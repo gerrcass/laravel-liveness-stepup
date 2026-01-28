@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Auth\RegisterController;
+use App\Http\Controllers\StepUpController;
 
 /*
 |--------------------------------------------------------------------------
@@ -16,3 +18,106 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return view('welcome');
 });
+
+Route::get('/register', [RegisterController::class, 'show'])->name('register.show');
+Route::post('/register', [RegisterController::class, 'register'])->name('register');
+
+use App\Http\Controllers\Auth\LoginController;
+
+Route::get('/login', [LoginController::class, 'show'])->name('login.show');
+Route::post('/login', [LoginController::class, 'login'])->name('login');
+Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
+
+Route::get('/step-up', [StepUpController::class, 'show'])->middleware('auth')->name('stepup.show');
+Route::post('/step-up/verify', [StepUpController::class, 'verify'])->middleware('auth')->name('stepup.verify');
+Route::get('/dashboard', function () { return view('dashboard'); })->middleware('auth')->name('dashboard');
+
+// Example special operation that requires privileged role + step-up verification
+Route::post('/special-operation', function () {
+    $user = auth()->user();
+    $verification = session('stepup_verification_result');
+    return view('special_operation_result', [
+        'user' => $user,
+        'verification' => $verification,
+    ]);
+})->middleware(['auth', 'require.stepup'])->name('special.operation');
+
+// Endpoint for client-side Face Liveness to POST verification result
+use Illuminate\Support\Facades\Route as RouteFacade;
+RouteFacade::post('/rekognition/verify-liveness', function (\Illuminate\Http\Request $request) {
+    $data = $request->validate([
+        'user_id' => 'required|integer',
+        'liveness' => 'required|array',
+    ]);
+
+    $user = App\Models\User::find($data['user_id']);
+    if (!$user) return response()->json(['error' => 'user_not_found'], 404);
+
+    $liveness = $data['liveness'];
+    // Basic acceptance logic: client indicates success. For production, verify signature or call Rekognition server-side.
+    if (!empty($liveness['success'])) {
+        $face = $user->userFace;
+        if ($face) {
+            $face->verification_status = 'verified';
+            $face->save();
+        }
+        // mark session so subsequent operations within timeout are allowed
+        $request->session()->put('stepup_verified_at', \Carbon\Carbon::now()->toDateTimeString());
+        return response()->json(['status' => 'verified']);
+    }
+
+    return response()->json(['status' => 'failed'], 400);
+});
+
+Route::get('/simulate-verify', function () {
+    return view('simulate_verify');
+})->middleware('auth')->name('simulate.verify');
+
+// Debug: list users (development only)
+Route::get('/debug-users', function () {
+    return response()->json(App\Models\User::all()->map->only(['id','email','name']));
+});
+
+Route::get('/debug-check-password', function (\Illuminate\Http\Request $request) {
+    $email = $request->query('email');
+    $password = $request->query('password');
+    $user = App\Models\User::where('email', $email)->first();
+    if (!$user) return response()->json(['ok' => false, 'reason' => 'no_user']);
+    return response()->json(['ok' => \Illuminate\Support\Facades\Hash::check($password, $user->password)]);
+});
+
+// Debug: login as user id (development only)
+Route::get('/debug-login/{id}', function ($id) {
+    $user = App\Models\User::find($id);
+    if (!$user) return redirect('/login');
+    Auth::login($user);
+    return redirect('/dashboard');
+});
+
+Route::get('/debug-create-face/{id}', function ($id) {
+    $user = App\Models\User::find($id);
+    if (!$user) return response()->json(['ok'=>false,'reason'=>'no_user']);
+    $face = $user->userFace ?: new App\Models\UserFace();
+    $face->user_id = $user->id;
+    $face->face_data = ['debug'=>'created'];
+    $face->verification_status = 'pending';
+    $face->save();
+    return response()->json(['ok'=>true,'face'=>$face]);
+});
+
+Route::get('/debug-face/{id}', function ($id) {
+    $user = App\Models\User::find($id);
+    if (!$user) return response()->json(['ok'=>false,'reason'=>'no_user']);
+    return response()->json($user->userFace);
+});
+
+use App\Http\Controllers\RekognitionController;
+Route::post('/rekognition/create-face-liveness-session', [RekognitionController::class, 'createFaceLivenessSession'])->middleware('auth');
+Route::get('/rekognition/face-liveness-results/{sessionId}', [RekognitionController::class, 'getFaceLivenessResults'])->middleware('auth');
+
+Route::get('/debug-session', function (\Illuminate\Http\Request $r) {
+    return response()->json([
+        'session_id' => $r->cookie(config('session.cookie')),
+        'stepup_verified_at' => $r->session()->get('stepup_verified_at'),
+    ]);
+})->middleware('auth');
