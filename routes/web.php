@@ -29,6 +29,7 @@ Route::post('/login', [LoginController::class, 'login'])->name('login');
 Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
 
 Route::get('/step-up', [StepUpController::class, 'show'])->middleware('auth')->name('stepup.show');
+Route::get('/step-up/attempt-image', [StepUpController::class, 'attemptImage'])->middleware('auth')->name('stepup.attempt_image');
 Route::post('/step-up/verify', [StepUpController::class, 'verify'])->middleware('auth')->name('stepup.verify');
 Route::get('/dashboard', function () { return view('dashboard'); })->middleware('auth')->name('dashboard');
 
@@ -42,20 +43,21 @@ Route::post('/special-operation', function () {
     ]);
 })->middleware(['auth', 'require.stepup'])->name('special.operation');
 
-// Endpoint for client-side Face Liveness to POST verification result
+// Endpoint to mark step-up as verified (e.g. from a simulated or client-side flow).
+// The main step-up flow uses SearchFacesByImage via StepUpController::verify.
 use Illuminate\Support\Facades\Route as RouteFacade;
-RouteFacade::post('/rekognition/verify-liveness', function (\Illuminate\Http\Request $request) {
+RouteFacade::post('/rekognition/mark-stepup-verified', function (\Illuminate\Http\Request $request) {
     $data = $request->validate([
         'user_id' => 'required|integer',
-        'liveness' => 'required|array',
+        'verification' => 'required|array',
     ]);
 
     $user = App\Models\User::find($data['user_id']);
     if (!$user) return response()->json(['error' => 'user_not_found'], 404);
 
-    $liveness = $data['liveness'];
-    // Basic acceptance logic: client indicates success. For production, verify signature or call Rekognition server-side.
-    if (!empty($liveness['success'])) {
+    $verification = $data['verification'];
+    // Basic acceptance logic: client indicates success. For production, verify server-side (e.g. Rekognition SearchFacesByImage).
+    if (!empty($verification['success'])) {
         $face = $user->userFace;
         if ($face) {
             $face->verification_status = 'verified';
@@ -111,6 +113,7 @@ Route::get('/debug-face/{id}', function ($id) {
     return response()->json($user->userFace);
 });
 
+// Optional: AWS Face Liveness API (not used by the main step-up flow, which uses SearchFacesByImage).
 use App\Http\Controllers\RekognitionController;
 Route::post('/rekognition/create-face-liveness-session', [RekognitionController::class, 'createFaceLivenessSession'])->middleware('auth');
 Route::get('/rekognition/face-liveness-results/{sessionId}', [RekognitionController::class, 'getFaceLivenessResults'])->middleware('auth');

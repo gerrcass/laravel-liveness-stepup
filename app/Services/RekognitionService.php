@@ -38,6 +38,9 @@ class RekognitionService
         return $result->toArray();
     }
 
+    /**
+     * Used by the main step-up flow: search for a matching face in the collection (SearchFacesByImage).
+     */
     public function searchFace(string $imagePath, string $collectionId = 'users', float $threshold = 85.0)
     {
         $bytes = file_get_contents($imagePath);
@@ -52,6 +55,9 @@ class RekognitionService
         return $result->toArray();
     }
 
+    /**
+     * AWS Face Liveness API (optional; not used by the main step-up flow, which uses searchFace).
+     */
     public function createFaceLivenessSession(string $sessionName = null, array $options = []): array
     {
         $params = [];
@@ -64,6 +70,7 @@ class RekognitionService
         return $result->toArray();
     }
 
+    /** AWS Face Liveness API: get session results (optional flow). */
     public function getFaceLivenessSessionResults(string $sessionId): array
     {
         $result = $this->client->getFaceLivenessSessionResults([

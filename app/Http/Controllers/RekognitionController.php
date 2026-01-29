@@ -6,13 +6,18 @@ use App\Services\RekognitionService;
 use App\Services\StsService;
 use Illuminate\Http\Request;
 
+/**
+ * Exposes Rekognition-related HTTP endpoints.
+ * The main step-up flow uses face verification via SearchFacesByImage (see StepUpController).
+ * The methods below wrap the optional AWS Face Liveness API (CreateFaceLivenessSession / GetFaceLivenessSessionResults).
+ */
 class RekognitionController extends Controller
 {
+    /** Creates an AWS Face Liveness session (optional flow; main step-up uses SearchFacesByImage). */
     public function createFaceLivenessSession(Request $request, RekognitionService $rekognition, StsService $sts)
     {
         $user = $request->user();
 
-        // Create server-side Face Liveness session
         $session = $rekognition->createFaceLivenessSession((string) ($user->id ?? null));
 
         // Provide temporary credentials for client to call Rekognition directly (optional)
@@ -24,6 +29,7 @@ class RekognitionController extends Controller
         ]);
     }
 
+    /** Returns results for an AWS Face Liveness session (optional flow). */
     public function getFaceLivenessResults(Request $request, RekognitionService $rekognition, $sessionId)
     {
         $result = $rekognition->getFaceLivenessSessionResults($sessionId);
