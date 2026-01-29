@@ -4,14 +4,17 @@ This project is a proof-of-concept demonstrating how to implement **step-up auth
 
 ## Table of Contents
 
-- [Project Overview](#project-overview)
-- [How it Works](#how-it-works)
-- [Core Technologies](#core-technologies)
-- [Setup and Installation](#setup-and-installation)
-- [Configuration](#configuration)
-- [Running the Application](#running-the-application)
-- [Key Application Flow](#key-application-flow)
-- [Project Structure](#project-structure)
+- [Amazon Rekognition Step-Up Authentication with Face Recognition - Laravel Demo](#amazon-rekognition-step-up-authentication-with-face-recognition---laravel-demo)
+  - [Table of Contents](#table-of-contents)
+  - [Project Overview](#project-overview)
+  - [How it Works](#how-it-works)
+  - [Core Technologies](#core-technologies)
+  - [Setup and Installation](#setup-and-installation)
+  - [Configuration](#configuration)
+    - [AWS Credentials](#aws-credentials)
+  - [Running the Application](#running-the-application)
+  - [Key Application Flow](#key-application-flow)
+  - [Project Structure](#project-structure)
 
 ## Project Overview
 
@@ -51,8 +54,8 @@ This project uses Amazon Rekognition's Face Recognition (SearchFacesByImage) to 
 1.  **Clone the Repository**
 
     ```bash
-    git clone https://github.com/your-repo/amazon_rekognition.git
-    cd amazon_rekognition
+    git clone https://github.com/gerrcass/laravel-liveness-stepup.git
+    cd laravel-liveness-stepup
     ```
 
 2.  **Install Dependencies**
@@ -74,10 +77,16 @@ This project uses Amazon Rekognition's Face Recognition (SearchFacesByImage) to 
 4.  **Configure Database**
     Open the `.env` file and set your database connection details (`DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`).
 
-5.  **Run Migrations and Seeders**
-    This will create the necessary tables and seed the database with initial data (e.g., user roles).
     ```bash
-    php artisan migrate --seed
+    DB_CONNECTION=sqlite
+    ```
+
+5.  **Run Migrations and Seeders**
+    This will create the necessary tables and seed the database with initial data (e.g., user roles). Make sure to create the empty `database.sqlite` file first.
+
+    ```bash
+    touch database/database.sqlite
+    php artisan migrate:fresh --seed
     ```
 
 ## Configuration
