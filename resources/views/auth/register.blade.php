@@ -21,6 +21,13 @@
         <label for="password_confirmation">Confirmar Contraseña:</label>
         <input type="password" name="password_confirmation" required>
         <br>
+        <label for="role">Rol:</label>
+        <select name="role" id="role" required>
+            @foreach($roles as $role)
+                <option value="{{ $role->name }}" {{ old('role') === $role->name ? 'selected' : '' }}>{{ ucfirst($role->name) }}</option>
+            @endforeach
+        </select>
+        <br>
         <label for="face_image">Imagen Facial:</label>
         <input type="file" name="face_image" accept="image/*" required>
         <br>

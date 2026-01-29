@@ -8,21 +8,26 @@ use App\Models\UserFace;
 use App\Services\RekognitionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Spatie\Permission\Models\Role;
 
 class RegisterController extends Controller
 {
     public function show()
     {
-        return view('auth.register');
+        $roles = Role::orderBy('name')->get();
+
+        return view('auth.register', compact('roles'));
     }
 
     public function register(Request $request, RekognitionService $rekognition)
     {
+        $roleNames = Role::pluck('name')->toArray();
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:6|confirmed',
             'face_image' => 'required|image|max:5120',
+            'role' => 'required|string|in:' . implode(',', $roleNames),
         ]);
 
         $user = User::create([
@@ -30,6 +35,8 @@ class RegisterController extends Controller
             'email' => $data['email'],
             'password' => bcrypt($data['password']),
         ]);
+
+        $user->assignRole($data['role']);
 
         $path = $request->file('face_image')->store('faces');
         $fullPath = storage_path('app/' . $path);
@@ -54,6 +61,6 @@ class RegisterController extends Controller
 
         Auth::login($user);
 
-        return redirect('/');
+        return redirect('/dashboard');
     }
 }

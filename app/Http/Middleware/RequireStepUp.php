@@ -21,7 +21,7 @@ class RequireStepUp
 
         // If user has role privileged, require face verification
         if ($user->hasRole('privileged')) {
-            $timeout = env('STEPUP_TIMEOUT', 900); // seconds
+            $timeout = config('stepup.timeout', 900); // seconds
 
             // 1) allow if session has recent verification
             $verifiedAt = $request->session()->get('stepup_verified_at');

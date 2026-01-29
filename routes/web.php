@@ -33,6 +33,25 @@ Route::get('/step-up/attempt-image', [StepUpController::class, 'attemptImage'])-
 Route::post('/step-up/verify', [StepUpController::class, 'verify'])->middleware('auth')->name('stepup.verify');
 Route::get('/dashboard', function () { return view('dashboard'); })->middleware('auth')->name('dashboard');
 
+// Serve the current user's registered face image (thumbnail for UI)
+Route::get('/user/registered-face', function (\Illuminate\Http\Request $request) {
+    $user = $request->user();
+    $face = $user?->userFace;
+    $path = $face?->face_data['path'] ?? null;
+    if (!$path || !\Illuminate\Support\Facades\Storage::disk('local')->exists($path)) {
+        abort(404);
+    }
+    $mime = \Illuminate\Support\Facades\Storage::disk('local')->mimeType($path) ?: 'image/jpeg';
+    return response()->stream(function () use ($path) {
+        $stream = \Illuminate\Support\Facades\Storage::disk('local')->readStream($path);
+        fpassthru($stream);
+        fclose($stream);
+    }, 200, [
+        'Content-Type' => $mime,
+        'Cache-Control' => 'private, max-age=60',
+    ]);
+})->middleware('auth')->name('user.registered_face');
+
 // Example special operation that requires privileged role + step-up verification
 Route::post('/special-operation', function () {
     $user = auth()->user();
@@ -53,7 +72,9 @@ RouteFacade::post('/rekognition/mark-stepup-verified', function (\Illuminate\Htt
     ]);
 
     $user = App\Models\User::find($data['user_id']);
-    if (!$user) return response()->json(['error' => 'user_not_found'], 404);
+    if (!$user) {
+        return redirect()->route('dashboard')->withErrors(['verification' => 'Usuario no encontrado.']);
+    }
 
     $verification = $data['verification'];
     // Basic acceptance logic: client indicates success. For production, verify server-side (e.g. Rekognition SearchFacesByImage).
@@ -65,10 +86,10 @@ RouteFacade::post('/rekognition/mark-stepup-verified', function (\Illuminate\Htt
         }
         // mark session so subsequent operations within timeout are allowed
         $request->session()->put('stepup_verified_at', \Carbon\Carbon::now()->toDateTimeString());
-        return response()->json(['status' => 'verified']);
+        return redirect()->route('dashboard')->with('status', 'Verificación (simulada) completada. Ya puedes acceder a la operación protegida.');
     }
 
-    return response()->json(['status' => 'failed'], 400);
+    return redirect()->route('dashboard')->withErrors(['verification' => 'Verificación simulada fallida.']);
 });
 
 Route::get('/simulate-verify', function () {

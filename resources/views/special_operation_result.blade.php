@@ -1,12 +1,14 @@
-<!doctype html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Special Operation Result</title>
-</head>
-<body>
-    <h1>Special Operation</h1>
-    <p>User: {{ $user->name }} ({{ $user->email }})</p>
+@extends('layouts.app')
+
+@section('title', 'Operación Protegida')
+
+@section('nav_back')
+    <a href="{{ route('dashboard') }}">← Volver al dashboard</a>
+@endsection
+
+@section('content')
+    <h1>✅ Operación Protegida</h1>
+    <p><strong>Estás viendo esto porque superaste la verificación facial exitosamente.</strong> Solo los usuarios con rol privilegiado y que hayan pasado la "step-up authentication" pueden acceder aquí.</p>
 
     @if($verification)
         <h2>Verificación facial (imagen enviada)</h2>
@@ -23,9 +25,8 @@
         <h3>Respuesta JSON completa de Rekognition</h3>
         <pre style="background:#f5f5f5; padding:1rem; overflow:auto; max-height:500px;">{{ json_encode($verification['rekognition_full_response'] ?? $verification, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
     @else
-        <p>No verification details available in session.</p>
+        <p>No hay detalles de verificación en sesión.</p>
     @endif
 
-    <p><a href="{{ route('dashboard') }}">Back to dashboard</a></p>
-</body>
-</html>
+    <p><a href="{{ route('dashboard') }}">Volver al dashboard</a></p>
+@endsection
