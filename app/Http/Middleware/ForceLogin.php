@@ -24,6 +24,7 @@ class ForceLogin
             'robots.txt',
             'storage/*',
             'rekognition/*',
+            'api/rekognition/*',
         ];
 
         foreach ($allow as $pattern) {

@@ -5,8 +5,16 @@
         "build": "vite build"
     },
     "devDependencies": {
+        "@vitejs/plugin-react": "^4.0.0",
         "axios": "^1.1.2",
         "laravel-vite-plugin": "^0.7.2",
         "vite": "^4.0.0"
+    },
+    "dependencies": {
+        "@aws-amplify/ui-react": "^6.0.0",
+        "@aws-amplify/ui-react-liveness": "^3.0.0",
+        "aws-amplify": "^6.0.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
     }
 }

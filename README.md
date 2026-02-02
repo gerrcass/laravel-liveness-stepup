@@ -1,17 +1,20 @@
-# Amazon Rekognition Step-Up Authentication with Face Recognition - Laravel Demo
+# Amazon Rekognition Step-Up Authentication with Face Recognition & Face Liveness - Laravel Demo
 
-This project is a proof-of-concept demonstrating how to implement **step-up authentication** in a Laravel application using **Amazon Rekognition's Face Recognition** feature. This allows you to require an additional, high-assurance verification step for users attempting to access sensitive parts of your application. Users register with a reference face image, and subsequent verifications compare uploaded images against this reference.
+This project is a proof-of-concept demonstrating how to implement **step-up authentication** in a Laravel application using **Amazon Rekognition's Face Recognition** and **Face Liveness** features. This allows you to require an additional, high-assurance verification step for users attempting to access sensitive parts of your application. Users can register with either a reference face image or Face Liveness, and subsequent verifications use the corresponding method.
 
 ## Table of Contents
 
-- [Amazon Rekognition Step-Up Authentication with Face Recognition - Laravel Demo](#amazon-rekognition-step-up-authentication-with-face-recognition---laravel-demo)
+- [Amazon Rekognition Step-Up Authentication with Face Recognition & Face Liveness - Laravel Demo](#amazon-rekognition-step-up-authentication-with-face-recognition--face-liveness---laravel-demo)
   - [Table of Contents](#table-of-contents)
   - [Project Overview](#project-overview)
   - [How it Works](#how-it-works)
+    - [Registration Methods](#registration-methods)
+    - [Verification Methods](#verification-methods)
   - [Core Technologies](#core-technologies)
   - [Setup and Installation](#setup-and-installation)
   - [Configuration](#configuration)
     - [AWS Credentials](#aws-credentials)
+    - [Face Liveness Configuration](#face-liveness-configuration)
   - [Running the Application](#running-the-application)
   - [Key Application Flow](#key-application-flow)
   - [Project Structure](#project-structure)
@@ -20,34 +23,52 @@ This project is a proof-of-concept demonstrating how to implement **step-up auth
 
 In many applications, certain actions (e.g., changing account details, transferring funds, accessing admin panels) are more sensitive than others. Standard password-based authentication might not be sufficient to protect these actions. Step-up authentication provides an additional layer of security by requiring the user to re-verify their identity in real-time.
 
-This project uses Amazon Rekognition's Face Recognition (SearchFacesByImage) to verify that the user's uploaded face matches their registered reference image.
+This project now supports two methods of face verification:
+1. **Traditional Face Recognition**: Users upload a reference image during registration and verify with uploaded images
+2. **Face Liveness**: Users complete a video selfie challenge during registration and verification, providing protection against spoofing attacks
 
 ## How it Works
 
-1.  A user registers with their standard username, password, and a reference face image. The face image is indexed in a Rekognition face collection with the user's ID as the external identifier.
-2.  The user logs into the application using their standard username and password.
-3.  When they try to access a protected route (a "special operation"), the application checks if they have recently completed a step-up verification (within a configurable timeout, default 900 seconds).
-4.  If they haven't or the timeout has expired, they are redirected to a verification page.
-5.  The user uploads a face image through a form.
-6.  The backend uses Rekognition's `SearchFacesByImage` API to search for matching faces in the collection. The verification succeeds if:
-    - A match is found with similarity confidence >= 85%
-    - The matched face's `ExternalImageId` matches the current user's ID
-7.  Upon successful verification, the backend marks the user's session as "verified" with a timestamp, valid for the configured timeout period (`STEPUP_TIMEOUT` environment variable).
-8.  The user is then redirected to the sensitive page they originally requested.
-9.  Subsequent access attempts within the timeout period will bypass verification.
+### Registration Methods
+
+**Traditional Image Method:**
+1. User registers with username, password, and uploads a reference face image
+2. The face image is indexed in a Rekognition face collection with the user's ID as the external identifier
+
+**Face Liveness Method:**
+1. User registers with username, password, and completes a Face Liveness challenge
+2. The system creates a Face Liveness session and captures a reference image from the video
+3. The reference image is indexed in the Rekognition face collection
+
+### Verification Methods
+
+**Traditional Image Verification:**
+1. User uploads a live image through a form
+2. Backend uses Rekognition's `SearchFacesByImage` API to compare against the collection
+3. Verification succeeds if similarity confidence >= 85% and user ID matches
+
+**Face Liveness Verification:**
+1. User completes a Face Liveness challenge (video selfie with movement/light challenges)
+2. System extracts reference image from the liveness session
+3. Backend uses `SearchFacesByImage` to compare against the collection
+4. Verification succeeds if both liveness confidence >= 85% and face similarity >= 85%
 
 ## Core Technologies
 
 - **Framework**: Laravel 10.x
-- **Authentication**: Standard Laravel session-based authentication.
+- **Authentication**: Standard Laravel session-based authentication
 - **Step-Up Authentication**:
-    - **Amazon Rekognition**: For Face Recognition using `SearchFacesByImage` API.
-    - **Face Collection**: Uses a Rekognition face collection to store registered user faces.
-    - **AWS SDK for PHP**: To communicate with AWS services from the Laravel backend.
-    - **Session Management**: Verification status stored in session with configurable timeout.
-- **Database**: Any Laravel-compatible database (e.g., MySQL, PostgreSQL, SQLite).
-- **Frontend**: Blade templates with HTML forms for uploading face images.
-- **Role-Based Access**: Uses `spatie/laravel-permission` to restrict step-up protected routes to users with the 'privileged' role.
+    - **Amazon Rekognition**: For Face Recognition using `SearchFacesByImage` API
+    - **Amazon Rekognition Face Liveness**: For anti-spoofing video selfie verification
+    - **Face Collection**: Uses a Rekognition face collection to store registered user faces
+    - **AWS SDK for PHP**: To communicate with AWS services from the Laravel backend
+    - **Session Management**: Verification status stored in session with configurable timeout
+- **Frontend**: 
+    - **React**: For Face Liveness UI components
+    - **AWS Amplify UI**: Face Liveness detector component
+    - **Blade Templates**: For traditional forms and layouts
+- **Database**: Any Laravel-compatible database (e.g., MySQL, PostgreSQL, SQLite)
+- **Role-Based Access**: Uses `spatie/laravel-permission` to restrict step-up protected routes
 
 ## Setup and Installation
 
@@ -75,14 +96,14 @@ This project uses Amazon Rekognition's Face Recognition (SearchFacesByImage) to 
     ```
 
 4.  **Configure Database**
-    Open the `.env` file and set your database connection details (`DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`).
+    Open the `.env` file and set your database connection details.
 
     ```bash
     DB_CONNECTION=sqlite
     ```
 
 5.  **Run Migrations and Seeders**
-    This will create the necessary tables and seed the database with initial data (e.g., user roles). Make sure to create the empty `database.sqlite` file first.
+    This will create the necessary tables and seed the database with initial data.
 
     ```bash
     touch database/database.sqlite
@@ -93,28 +114,38 @@ This project uses Amazon Rekognition's Face Recognition (SearchFacesByImage) to 
 
 ### AWS Credentials
 
-To use Amazon Rekognition, you need to configure your AWS credentials. Add the following to your `.env` file:
+To use Amazon Rekognition and Face Liveness, you need to configure your AWS credentials. Add the following to your `.env` file:
 
 ```dotenv
 AWS_ACCESS_KEY_ID=your_aws_access_key
 AWS_SECRET_ACCESS_KEY=your_aws_secret_key
 AWS_DEFAULT_REGION=us-east-1
+AWS_S3_BUCKET=your_s3_bucket_name
 ```
 
-The IAM user associated with these credentials needs permissions for Rekognition. A sample policy would include:
+The IAM user associated with these credentials needs permissions for:
 
 - `rekognition:CreateCollection`
 - `rekognition:IndexFaces`
 - `rekognition:SearchFacesByImage`
-- `rekognition:ListFaces` (optional, for debugging)
+- `rekognition:CreateFaceLivenessSession`
+- `rekognition:GetFaceLivenessSessionResults`
+- `rekognition:StartFaceLivenessSession`
+- `sts:GetSessionToken`
 
-Additionally, you can configure a timeout for step-up verification sessions:
+### Face Liveness Configuration
+
+Face Liveness sessions can optionally store audit images in S3. Configure the S3 bucket:
 
 ```dotenv
-STEPUP_TIMEOUT=30
+AWS_S3_BUCKET=your-face-liveness-bucket
 ```
 
-This sets the number of seconds that a successful verification remains valid (default: 900 seconds).
+You can also configure the step-up verification timeout:
+
+```dotenv
+STEPUP_TIMEOUT=900
+```
 
 ## Running the Application
 
@@ -134,19 +165,30 @@ The application will be available at `http://localhost:8000`.
 
 ## Key Application Flow
 
-1.  **Registration/Login**: Register a new user with a reference face image (the image is indexed in Rekognition) or log in with an existing one.
-2.  **Accessing a Protected Route**: After logging in, try to access a sensitive area of the application. The project includes a "Special Operation" button on the dashboard for this purpose (only visible to users with the 'privileged' role).
-3.  **Step-Up Verification**: If verification hasn't been completed recently, you will be redirected to the step-up verification page. Upload a face image that matches your registered face.
-4.  **Access Granted**: Upon successful verification (confidence >= 85% and matching user ID), you will be redirected to the special operation result page, confirming that you have passed the step-up check. The verification status is stored in your session and remains valid for the configured timeout period.
-5.  **Subsequent Access**: If you attempt to access the protected route again within the timeout period, verification will be bypassed automatically.
+1.  **Registration**: 
+    - Choose between "Imagen Facial" (traditional) or "Face Liveness" methods
+    - For traditional: Upload a reference face image
+    - For Face Liveness: Complete a video selfie challenge with movement/light instructions
+    
+2.  **Login**: Standard username/password authentication
+
+3.  **Accessing Protected Routes**: Try to access a sensitive area (requires 'privileged' role)
+
+4.  **Step-Up Verification**: 
+    - **Traditional users**: Upload a live image for comparison
+    - **Face Liveness users**: Complete another Face Liveness challenge
+    
+5.  **Access Granted**: Upon successful verification, access is granted for the configured timeout period
 
 ## Project Structure
 
-- `app/Http/Controllers/RekognitionController.php`: Handles Rekognition API requests. The main step-up flow uses SearchFacesByImage via StepUpController; this controller also exposes optional AWS Face Liveness session endpoints.
-- `app/Http/Controllers/StepUpController.php`: Manages the user-facing part of the step-up flow. Handles image uploads and verifies faces using `RekognitionService::searchFace()`.
-- `app/Services/RekognitionService.php`: A service class that encapsulates all interactions with the Amazon Rekognition API. Key methods: `indexFace()` (for registration), `searchFace()` (for verification).
-- `app/Services/StsService.php`: A service class for generating temporary AWS credentials using the Security Token Service (STS).
-- `app/Http/Middleware/RequireStepUp.php`: The middleware responsible for protecting sensitive routes and triggering the step-up flow. Checks session for recent verification and validates against `STEPUP_TIMEOUT`.
-- `routes/web.php`: Defines all application routes, including the protected routes and the API endpoints for Rekognition.
-- `resources/views/auth/stepup.blade.php`: The view file containing a form for uploading face images for verification.
-- `AGENTS.md`: A file with instructions for AI agents working on this project.
+- `app/Http/Controllers/RekognitionController.php`: Handles Face Liveness API requests and completion
+- `app/Http/Controllers/StepUpController.php`: Manages step-up verification flow for both methods
+- `app/Http/Controllers/Auth/RegisterController.php`: Updated to support both registration methods
+- `app/Services/RekognitionService.php`: Enhanced with Face Liveness methods
+- `app/Models/UserFace.php`: Updated to store registration method and liveness data
+- `resources/js/components/FaceLivenessDetector.jsx`: React component for Face Liveness UI
+- `resources/views/auth/register.blade.php`: Registration form with method selection
+- `resources/views/auth/stepup.blade.php`: Step-up verification with method-specific UI
+- `routes/web.php`: All application routes including Face Liveness endpoints
+- `database/migrations/*_add_face_liveness_support_to_user_faces_table.php`: Database schema updates

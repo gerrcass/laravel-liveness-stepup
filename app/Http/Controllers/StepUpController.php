@@ -12,7 +12,11 @@ class StepUpController extends Controller
 {
     public function show()
     {
-        return view('auth.stepup');
+        $user = Auth::user();
+        $userFace = $user->userFace;
+        $registrationMethod = $userFace ? $userFace->registration_method : 'image';
+        
+        return view('auth.stepup', compact('registrationMethod'));
     }
 
     /**
@@ -42,76 +46,141 @@ class StepUpController extends Controller
 
     public function verify(Request $request, RekognitionService $rekognition)
     {
-        $request->validate([
-            'live_image' => 'required|image|max:5120',
-        ]);
+        $user = Auth::user();
+        $userFace = $user->userFace;
+        $registrationMethod = $userFace ? $userFace->registration_method : 'image';
 
-        $path = $request->file('live_image')->store('live');
-        $fullPath = storage_path('app/' . $path);
-
-        // Store image path so UI can show the image that was submitted
-        $request->session()->put('stepup_last_attempt_image_path', $path);
-
-        try {
-            $result = $rekognition->searchFace($fullPath);
-        } catch (\Aws\Rekognition\Exception\RekognitionException $e) {
-            $request->session()->put('stepup_last_attempt_rekognition_response', [
-                'error' => $e->getMessage(),
-                'exception_class' => get_class($e),
+        if ($registrationMethod === 'liveness') {
+            // Face Liveness verification
+            $request->validate([
+                'liveness_session_id' => 'required|string',
             ]);
-            return back()->withErrors(['rekognition' => 'Face detection error: ' . $e->getMessage()]);
-        } catch (\Exception $e) {
-            $request->session()->put('stepup_last_attempt_rekognition_response', [
-                'error' => $e->getMessage(),
-                'exception_class' => get_class($e),
-            ]);
-            return back()->withErrors(['rekognition' => 'Unexpected error: ' . $e->getMessage()]);
-        }
 
-        $matches = $result['FaceMatches'] ?? [];
-        if (count($matches) > 0) {
-            $best = $matches[0];
-            $externalId = $best['Face']['ExternalImageId'] ?? null;
-            $confidence = $best['Similarity'] ?? ($best['Face']['Confidence'] ?? 0);
+            $sessionId = $request->input('liveness_session_id');
 
-            // store verification attempt details in session for later inspection (including full Rekognition response)
-            $request->session()->put('stepup_verification_result', [
-                'external_id' => $externalId,
-                'confidence' => $confidence,
-                'raw_match' => $best,
-                'rekognition_full_response' => $result,
-                'checked_at' => \Carbon\Carbon::now()->toDateTimeString(),
-            ]);
-            $request->session()->put('stepup_verification_image_path', $path);
+            try {
+                $result = $rekognition->verifyFaceWithLiveness($sessionId, (string) $user->id);
+                
+                $searchResult = $result['searchResult'];
+                $livenessResult = $result['livenessResult'];
+                $livenessConfidence = $result['livenessConfidence'];
 
-            if ($externalId == (string) Auth::id() && $confidence >= 85.0) {
-                // mark verified (session-first, DB for audit)
-                $user = Auth::user();
-                $face = $user->userFace;
-                if ($face) {
-                    $face->verification_status = 'verified';
-                    $face->last_verified_at = \Carbon\Carbon::now();
-                    $face->save();
-                }
-                // mark session so subsequent operations within timeout are allowed
-                $request->session()->put('stepup_verified_at', \Carbon\Carbon::now()->toDateTimeString());
+                // Store verification attempt details in session
+                $request->session()->put('stepup_verification_result', [
+                    'method' => 'liveness',
+                    'liveness_confidence' => $livenessConfidence,
+                    'session_id' => $sessionId,
+                    'liveness_result' => $livenessResult,
+                    'search_result' => $searchResult,
+                    'checked_at' => now()->toDateTimeString(),
+                ]);
 
-                // redirect to intended URL if present. If the intended request was
-                // a POST, return an auto-submitting form view that replays the POST.
-                $intended = $request->session()->pull('stepup_intended');
-                if ($intended && isset($intended['method']) && strtoupper($intended['method']) === 'POST') {
-                    $targetUrl = $intended['url'];
-                    $inputs = $intended['input'] ?? [];
-                    return view('stepup_post_redirect', compact('targetUrl', 'inputs'));
+                $matches = $searchResult['FaceMatches'] ?? [];
+                if (count($matches) > 0) {
+                    $best = $matches[0];
+                    $externalId = $best['Face']['ExternalImageId'] ?? null;
+                    $faceConfidence = $best['Similarity'] ?? 0;
+
+                    if ($externalId == (string) $user->id && $faceConfidence >= 85.0 && $livenessConfidence >= 85.0) {
+                        // Mark verified
+                        $userFace->verification_status = 'verified';
+                        $userFace->last_verified_at = now();
+                        $userFace->save();
+
+                        $request->session()->put('stepup_verified_at', now()->toDateTimeString());
+
+                        // Redirect to intended URL
+                        $intended = $request->session()->pull('stepup_intended');
+                        if ($intended && isset($intended['method']) && strtoupper($intended['method']) === 'POST') {
+                            $targetUrl = $intended['url'];
+                            $inputs = $intended['input'] ?? [];
+                            return view('stepup_post_redirect', compact('targetUrl', 'inputs'));
+                        }
+
+                        $target = $intended['url'] ?? route('dashboard');
+                        return redirect($target)->with('status', 'Step-up verification passed with Face Liveness');
+                    }
                 }
 
-                $target = $intended['url'] ?? route('dashboard');
-                return redirect($target)->with('status', 'Step-up verification passed');
+                return back()->withErrors(['liveness' => 'Face Liveness verification failed']);
+            } catch (\Exception $e) {
+                $request->session()->put('stepup_last_attempt_rekognition_response', [
+                    'error' => $e->getMessage(),
+                    'exception_class' => get_class($e),
+                ]);
+                return back()->withErrors(['liveness' => 'Face Liveness error: ' . $e->getMessage()]);
             }
-        }
+        } else {
+            // Traditional image-based verification
+            $request->validate([
+                'live_image' => 'required|image|max:5120',
+            ]);
 
-        // No match or wrong user: keep image path and full Rekognition response for UI
-        $request->session()->put('stepup_last_attempt_rekognition_response', $result);
-        return back()->withErrors(['face' => 'Face verification failed']);
+            $path = $request->file('live_image')->store('live');
+            $fullPath = storage_path('app/' . $path);
+
+            // Store image path so UI can show the image that was submitted
+            $request->session()->put('stepup_last_attempt_image_path', $path);
+
+            try {
+                $result = $rekognition->searchFace($fullPath);
+            } catch (\Aws\Rekognition\Exception\RekognitionException $e) {
+                $request->session()->put('stepup_last_attempt_rekognition_response', [
+                    'error' => $e->getMessage(),
+                    'exception_class' => get_class($e),
+                ]);
+                return back()->withErrors(['rekognition' => 'Face detection error: ' . $e->getMessage()]);
+            } catch (\Exception $e) {
+                $request->session()->put('stepup_last_attempt_rekognition_response', [
+                    'error' => $e->getMessage(),
+                    'exception_class' => get_class($e),
+                ]);
+                return back()->withErrors(['rekognition' => 'Unexpected error: ' . $e->getMessage()]);
+            }
+
+            $matches = $result['FaceMatches'] ?? [];
+            if (count($matches) > 0) {
+                $best = $matches[0];
+                $externalId = $best['Face']['ExternalImageId'] ?? null;
+                $confidence = $best['Similarity'] ?? ($best['Face']['Confidence'] ?? 0);
+
+                // store verification attempt details in session for later inspection
+                $request->session()->put('stepup_verification_result', [
+                    'method' => 'image',
+                    'external_id' => $externalId,
+                    'confidence' => $confidence,
+                    'raw_match' => $best,
+                    'rekognition_full_response' => $result,
+                    'checked_at' => now()->toDateTimeString(),
+                ]);
+                $request->session()->put('stepup_verification_image_path', $path);
+
+                if ($externalId == (string) $user->id && $confidence >= 85.0) {
+                    // mark verified
+                    if ($userFace) {
+                        $userFace->verification_status = 'verified';
+                        $userFace->last_verified_at = now();
+                        $userFace->save();
+                    }
+                    
+                    $request->session()->put('stepup_verified_at', now()->toDateTimeString());
+
+                    // redirect to intended URL
+                    $intended = $request->session()->pull('stepup_intended');
+                    if ($intended && isset($intended['method']) && strtoupper($intended['method']) === 'POST') {
+                        $targetUrl = $intended['url'];
+                        $inputs = $intended['input'] ?? [];
+                        return view('stepup_post_redirect', compact('targetUrl', 'inputs'));
+                    }
+
+                    $target = $intended['url'] ?? route('dashboard');
+                    return redirect($target)->with('status', 'Step-up verification passed');
+                }
+            }
+
+            // No match or wrong user
+            $request->session()->put('stepup_last_attempt_rekognition_response', $result);
+            return back()->withErrors(['face' => 'Face verification failed']);
+        }
     }
 }

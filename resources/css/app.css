@@ -1,0 +1,74 @@
+/* Face Liveness Component CSS Fixes */
+.amplify-liveness-video-anchor {
+    position: relative !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.amplify-liveness-video {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 640px !important;
+    border-radius: 8px !important;
+}
+
+.amplify-liveness-oval-canvas {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    pointer-events: none !important;
+    z-index: 10 !important;
+}
+
+.amplify-liveness-oval-canvas canvas {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 640px !important;
+    max-height: 480px !important;
+}
+
+/* Ensure the container has proper styling */
+#liveness-container {
+    min-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+#face-liveness-root {
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+}
+
+/* Registration method styling */
+.registration-method {
+    margin: 20px 0;
+    padding: 20px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+}
+
+.registration-method.active {
+    border-color: #007bff;
+    background-color: #f8f9fa;
+}
+
+.method-selector {
+    margin-bottom: 20px;
+}
+
+.method-selector label {
+    display: inline-block;
+    margin-right: 20px;
+    cursor: pointer;
+}

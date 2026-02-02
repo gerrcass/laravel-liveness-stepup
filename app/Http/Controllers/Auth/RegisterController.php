@@ -26,7 +26,9 @@ class RegisterController extends Controller
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:6|confirmed',
-            'face_image' => 'required|image|max:5120',
+            'registration_method' => 'required|string|in:image,liveness',
+            'face_image' => 'required_if:registration_method,image|image|max:5120',
+            'liveness_session_id' => 'required_if:registration_method,liveness|string',
             'role' => 'required|string|in:' . implode(',', $roleNames),
         ]);
 
@@ -38,26 +40,57 @@ class RegisterController extends Controller
 
         $user->assignRole($data['role']);
 
-        $path = $request->file('face_image')->store('faces');
-        $fullPath = storage_path('app/' . $path);
+        if ($data['registration_method'] === 'image') {
+            // Traditional image-based registration
+            $path = $request->file('face_image')->store('faces');
+            $fullPath = storage_path('app/' . $path);
 
-        // Index face to Rekognition collection and save returned faceIds
-        try {
-            $index = $rekognition->indexFace($fullPath, (string)$user->id);
-            $faceIds = $index['FaceRecords'] ?? [];
-        } catch (\Exception $e) {
-            $faceIds = [];
+            try {
+                $index = $rekognition->indexFace($fullPath, (string)$user->id);
+                $faceIds = $index['FaceRecords'] ?? [];
+            } catch (\Exception $e) {
+                $faceIds = [];
+            }
+
+            UserFace::create([
+                'user_id' => $user->id,
+                'registration_method' => 'image',
+                'face_data' => [
+                    'path' => $path,
+                    'indexed' => count($faceIds) > 0,
+                    'face_records' => $faceIds,
+                ],
+                'verification_status' => 'pending',
+            ]);
+        } else {
+            // Face Liveness registration - use session data stored during liveness completion
+            $sessionId = $data['liveness_session_id'] ?? $request->session()->get('pending_liveness_session_id');
+            $livenessResult = $request->session()->get('pending_liveness_result');
+            
+            if (!$sessionId) {
+                return back()->withErrors(['liveness' => 'Face Liveness session ID not found. Please complete the Face Liveness check again.']);
+            }
+            
+            try {
+                $result = $rekognition->indexFaceFromLivenessSession($sessionId, (string)$user->id);
+                
+                UserFace::create([
+                    'user_id' => $user->id,
+                    'registration_method' => 'liveness',
+                    'face_data' => $result['indexResult'],
+                    'liveness_data' => $result['livenessResult'],
+                    'verification_status' => 'verified',
+                    'last_verified_at' => now(),
+                ]);
+                
+                // Clear session data
+                $request->session()->forget(['pending_liveness_session_id', 'pending_liveness_result']);
+            } catch (\Exception $e) {
+                // If liveness registration fails, delete the user and return error
+                $user->delete();
+                return back()->withErrors(['liveness' => 'Face Liveness registration failed: ' . $e->getMessage()]);
+            }
         }
-
-        $userFace = UserFace::create([
-            'user_id' => $user->id,
-            'face_data' => [
-                'path' => $path,
-                'indexed' => count($faceIds) > 0,
-                'face_records' => $faceIds,
-            ],
-            'verification_status' => 'pending',
-        ]);
 
         Auth::login($user);
 

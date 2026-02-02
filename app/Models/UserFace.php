@@ -11,13 +11,16 @@ class UserFace extends Model
 
     protected $fillable = [
         'user_id',
+        'registration_method',
         'face_data',
+        'liveness_data',
         'verification_status',
         'last_verified_at',
     ];
 
     protected $casts = [
         'face_data' => 'array',
+        'liveness_data' => 'array',
         'last_verified_at' => 'datetime',
     ];
 

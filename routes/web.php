@@ -134,10 +134,43 @@ Route::get('/debug-face/{id}', function ($id) {
     return response()->json($user->userFace);
 });
 
-// Optional: AWS Face Liveness API (not used by the main step-up flow, which uses SearchFacesByImage).
+// Face Liveness API endpoints
 use App\Http\Controllers\RekognitionController;
+
+// Registration endpoint (no auth required)
+Route::post('/rekognition/create-face-liveness-session-registration', [RekognitionController::class, 'createFaceLivenessSessionForRegistration']);
+Route::post('/rekognition/complete-liveness-registration-guest', [RekognitionController::class, 'completeLivenessRegistrationGuest']);
+
+// Test endpoint (temporary)
+Route::get('/test-liveness-registration', function(App\Services\RekognitionService $rekognition, App\Services\StsService $sts) {
+    try {
+        $session = $rekognition->createFaceLivenessSession();
+        $creds = $sts->getSessionToken(900);
+        
+        return response()->json([
+            'success' => true,
+            'sessionId' => $session['SessionId'],
+            'credentials' => [
+                'accessKeyId' => $creds['Credentials']['AccessKeyId'],
+                'secretAccessKey' => $creds['Credentials']['SecretAccessKey'],
+                'sessionToken' => $creds['Credentials']['SessionToken'],
+            ],
+            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ], 500);
+    }
+});
+
+// Authenticated endpoints
 Route::post('/rekognition/create-face-liveness-session', [RekognitionController::class, 'createFaceLivenessSession'])->middleware('auth');
 Route::get('/rekognition/face-liveness-results/{sessionId}', [RekognitionController::class, 'getFaceLivenessResults'])->middleware('auth');
+Route::post('/rekognition/complete-liveness-registration', [RekognitionController::class, 'completeLivenessRegistration'])->middleware('auth');
+Route::post('/rekognition/complete-liveness-verification', [RekognitionController::class, 'completeLivenessVerification'])->middleware('auth');
 
 Route::get('/debug-session', function (\Illuminate\Http\Request $r) {
     return response()->json([
