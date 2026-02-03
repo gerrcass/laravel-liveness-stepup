@@ -1,9 +1,14 @@
 import './bootstrap';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { Amplify } from 'aws-amplify';
+import '@aws-amplify/ui-react-liveness/styles.css';
 import FaceLivenessDetector from './components/FaceLivenessDetector';
 
-// Global function to initialize Face Liveness component
+if (typeof window !== 'undefined') {
+    window.Amplify = Amplify;
+}
+
 window.initializeFaceLiveness = function(purpose = 'verification') {
     const container = document.getElementById('face-liveness-root');
     if (!container) {
@@ -12,22 +17,19 @@ window.initializeFaceLiveness = function(purpose = 'verification') {
     }
 
     const root = createRoot(container);
-    
+
     const handleComplete = (result) => {
         console.log('Face Liveness completed:', result);
-        
+
         if (purpose === 'registration') {
-            // Store session ID for registration form
             if (result.success && result.sessionId) {
                 document.getElementById('liveness_session_id').value = result.sessionId;
             }
-            
-            // Call global callback if available
+
             if (window.onLivenessComplete) {
                 window.onLivenessComplete(result);
             }
         } else {
-            // For verification, call global callback
             if (window.onLivenessComplete) {
                 window.onLivenessComplete(result);
             }
@@ -36,8 +38,7 @@ window.initializeFaceLiveness = function(purpose = 'verification') {
 
     const handleError = (error) => {
         console.error('Face Liveness error:', error);
-        
-        // Call global error callback if available
+
         if (window.onLivenessError) {
             window.onLivenessError(error);
         }

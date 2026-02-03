@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>@yield('title', 'App')</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
     <style>
         body { font-family: sans-serif; margin: 0; padding: 1rem; }
         .nav { background: #f0f0f0; padding: 0.75rem 1rem; margin: -1rem -1rem 1rem -1rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }

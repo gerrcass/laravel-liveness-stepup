@@ -17,8 +17,10 @@ class RekognitionController extends Controller
     public function createFaceLivenessSessionForRegistration(Request $request, RekognitionService $rekognition, StsService $sts)
     {
         $purpose = 'registration';
-
-        $session = $rekognition->createFaceLivenessSession();
+        
+        // Create session WITH S3 output so images persist after session completion
+        // This is required because the frontend component may consume results before backend can retrieve them
+        $session = $rekognition->createFaceLivenessSession(null, [], true); // true = use S3
 
         // Provide temporary credentials for client to call Rekognition directly
         $creds = $sts->getSessionToken(900); // 15 minutes
@@ -35,7 +37,11 @@ class RekognitionController extends Controller
         ]);
     }
 
-    /** Complete Face Liveness registration for guest users (no auth required) */
+    /** Complete Face Liveness registration for guest users (no auth required)
+     * 
+     * IMPORTANT: This endpoint must be called BEFORE the frontend callback completes.
+     * The frontend should call this endpoint and wait for response before returning from callback.
+     */
     public function completeLivenessRegistrationGuest(Request $request, RekognitionService $rekognition)
     {
         $request->validate([
@@ -45,18 +51,19 @@ class RekognitionController extends Controller
         $sessionId = $request->input('sessionId');
 
         try {
-            // Just get the liveness session results to validate the session
+            // Get liveness session results FIRST (before frontend consumes them)
             $livenessResult = $rekognition->getFaceLivenessSessionResults($sessionId);
             
             // Clean liveness result for session storage (exclude all binary data)
             $livenessResultForStorage = $this->cleanLivenessResultForStorage($livenessResult);
             
-            // Store session ID in session for later use during actual registration
+            // Store session ID and results in session for later use during registration
             $request->session()->put('pending_liveness_session_id', $sessionId);
             $request->session()->put('pending_liveness_result', $livenessResultForStorage);
 
             return response()->json([
                 'success' => true,
+                'verified' => true,
                 'sessionId' => $sessionId,
                 'confidence' => $livenessResult['Confidence'] ?? 0,
                 'message' => 'Face Liveness session completed successfully',
@@ -104,7 +111,10 @@ class RekognitionController extends Controller
         $user = $request->user();
         $purpose = $request->input('purpose', 'verification'); // 'registration' or 'verification'
 
-        $session = $rekognition->createFaceLivenessSession((string) ($user->id ?? null));
+        // Create session WITH S3 output so images persist after session completion
+        // This is required because the frontend component may consume results before backend can retrieve them
+        // Also needed to avoid browser connecting directly to AWS (network/firewall issues)
+        $session = $rekognition->createFaceLivenessSession(null, [], true); // true = use S3
 
         // Provide temporary credentials for client to call Rekognition directly
         $creds = $sts->getSessionToken(900); // 15 minutes
@@ -180,45 +190,98 @@ class RekognitionController extends Controller
         $sessionId = $request->input('sessionId');
 
         try {
+            logger('Face Liveness verification started', ['sessionId' => $sessionId, 'userId' => $user->id]);
             $result = $rekognition->verifyFaceWithLiveness($sessionId, (string) $user->id);
             
             $searchResult = $result['searchResult'];
             $livenessResult = $result['livenessResult'];
             $livenessConfidence = $result['livenessConfidence'];
+            
+            logger('Verification results', [
+                'livenessConfidence' => $livenessConfidence,
+                'faceMatchesCount' => count($searchResult['FaceMatches'] ?? [])
+            ]);
 
             $matches = $searchResult['FaceMatches'] ?? [];
             $success = false;
             $faceConfidence = 0;
+            $matchedExternalId = null;
+            $allMatchesDetails = [];
 
-            if (count($matches) > 0) {
-                $best = $matches[0];
-                $externalId = $best['Face']['ExternalImageId'] ?? null;
-                $faceConfidence = $best['Similarity'] ?? 0;
+            logger('FaceMatches count', ['count' => count($matches)]);
 
-                if ($externalId == (string) $user->id && $faceConfidence >= 85.0 && $livenessConfidence >= 85.0) {
-                    $success = true;
-                    
-                    // Mark session as verified
-                    $request->session()->put('stepup_verified_at', now()->toDateTimeString());
-                    
-                    // Update user face record
-                    $userFace = $user->userFace;
-                    if ($userFace) {
-                        $userFace->verification_status = 'verified';
-                        $userFace->last_verified_at = now();
-                        $userFace->save();
+            // Iterate through ALL matches to find one that belongs to the current user
+            foreach ($matches as $index => $match) {
+                $externalId = $match['Face']['ExternalImageId'] ?? null;
+                $similarity = $match['Similarity'] ?? 0;
+
+                logger("Match $index details", [
+                    'externalId' => $externalId,
+                    'similarity' => $similarity,
+                    'userId' => (string) $user->id,
+                    'isCurrentUser' => $externalId == (string) $user->id
+                ]);
+
+                // Check if this match belongs to the current user
+                if ($externalId == (string) $user->id) {
+                    // Found a match for the current user
+                    $faceConfidence = $similarity;
+                    $matchedExternalId = $externalId;
+
+                    if ($faceConfidence >= 60.0 && $livenessConfidence >= 60.0) {
+                        $success = true;
+
+                        // Mark session as verified
+                        $request->session()->put('stepup_verified_at', now()->toDateTimeString());
+
+                        // Update user face record
+                        $userFace = $user->userFace;
+                        if ($userFace) {
+                            $userFace->verification_status = 'verified';
+                            $userFace->last_verified_at = now();
+                            $userFace->save();
+                        }
+
+                        logger('Verification SUCCESS for current user', [
+                            'userId' => $user->id,
+                            'faceConfidence' => $faceConfidence,
+                            'livenessConfidence' => $livenessConfidence
+                        ]);
+
+                        break;
                     }
                 }
+
+                $allMatchesDetails[] = [
+                    'externalId' => $externalId,
+                    'similarity' => $similarity,
+                    'isCurrentUser' => $externalId == (string) $user->id
+                ];
+            }
+
+            if (!$success) {
+                logger('Verification FAILED - no matching face found for current user', [
+                    'userId' => $user->id,
+                    'allMatches' => $allMatchesDetails,
+                    'livenessConfidence' => $livenessConfidence
+                ]);
             }
 
             return response()->json([
                 'success' => $success,
                 'livenessConfidence' => $livenessConfidence,
                 'faceConfidence' => $faceConfidence,
-                'matches' => count($matches),
+                'matchedExternalId' => $matchedExternalId,
+                'matchesCount' => count($matches),
+                'allMatches' => $allMatchesDetails,
                 'verified' => $success,
             ]);
         } catch (\Exception $e) {
+            logger('Face Liveness verification ERROR', [
+                'sessionId' => $sessionId,
+                'error' => $e->getMessage(),
+                'trace' => substr($e->getTraceAsString(), 0, 500)
+            ]);
             return response()->json([
                 'success' => false,
                 'error' => $e->getMessage(),

@@ -62,6 +62,16 @@ Route::post('/special-operation', function () {
     ]);
 })->middleware(['auth', 'require.stepup'])->name('special.operation');
 
+// GET route for special operation (after Face Liveness verification)
+Route::get('/special-operation', function () {
+    $user = auth()->user();
+    $verification = session('stepup_verification_result');
+    return view('special_operation_result', [
+        'user' => $user,
+        'verification' => $verification,
+    ]);
+})->middleware(['auth', 'require.stepup'])->name('special.operation.get');
+
 // Endpoint to mark step-up as verified (e.g. from a simulated or client-side flow).
 // The main step-up flow uses SearchFacesByImage via StepUpController::verify.
 use Illuminate\Support\Facades\Route as RouteFacade;

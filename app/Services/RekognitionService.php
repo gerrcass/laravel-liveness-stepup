@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use Aws\Rekognition\RekognitionClient;
+use Aws\S3\S3Client;
 
 class RekognitionService
 {
@@ -57,8 +58,13 @@ class RekognitionService
 
     /**
      * AWS Face Liveness API: Create a Face Liveness session for registration or verification
+     * 
+     * @param string|null $sessionName Optional session name/ID
+     * @param array $options Additional options to merge
+     * @param bool $useS3 Whether to use S3 for output (default: true if bucket configured)
+     * @return array
      */
-    public function createFaceLivenessSession(string $sessionName = null, array $options = []): array
+    public function createFaceLivenessSession(string $sessionName = null, array $options = [], bool $useS3 = true): array
     {
         $params = [
             'Settings' => [
@@ -66,8 +72,8 @@ class RekognitionService
             ],
         ];
         
-        // Only add S3 config if bucket is configured
-        $s3Bucket = env('AWS_S3_BUCKET');
+        // Only add S3 config if bucket is configured AND useS3 is true
+        $s3Bucket = $useS3 ? env('AWS_S3_BUCKET') : null;
         if ($s3Bucket) {
             $params['Settings']['OutputConfig'] = [
                 'S3Bucket' => $s3Bucket,
@@ -130,14 +136,15 @@ class RekognitionService
     /**
      * Index face from Face Liveness session results
      */
-    public function indexFaceFromLivenessSession(string $sessionId, string $externalImageId, string $collectionId = 'users'): array
+    public function indexFaceFromLivenessSession(string $sessionId, string $externalImageId, string $collectionId = 'users', ?array $sessionResults = null): array
     {
-        // Get liveness session results
-        $sessionResults = $this->getFaceLivenessSessionResults($sessionId);
-        
-        if (!isset($sessionResults['ReferenceImage']['Bytes'])) {
-            throw new \Exception('No reference image found in liveness session results');
+        // Get liveness session results (either passed in or fetched from AWS)
+        if ($sessionResults === null) {
+            $sessionResults = $this->getFaceLivenessSessionResults($sessionId);
         }
+        
+        // Get the reference image bytes (either directly from response or from S3)
+        $imageBytes = $this->getReferenceImageBytes($sessionResults);
 
         // Ensure collection exists
         try {
@@ -149,7 +156,7 @@ class RekognitionService
         // Index the reference image from liveness session
         $result = $this->client->indexFaces([
             'CollectionId' => $collectionId,
-            'Image' => ['Bytes' => $sessionResults['ReferenceImage']['Bytes']],
+            'Image' => ['Bytes' => $imageBytes],
             'ExternalImageId' => (string) $externalImageId,
             'DetectionAttributes' => [],
         ]);
@@ -164,6 +171,53 @@ class RekognitionService
     }
 
     /**
+     * Get reference image bytes from Face Liveness session results
+     * Handles both direct Bytes and S3Object storage
+     */
+    private function getReferenceImageBytes(array $sessionResults): string
+    {
+        // Check if bytes are directly available
+        if (isset($sessionResults['ReferenceImage']['Bytes'])) {
+            return $sessionResults['ReferenceImage']['Bytes'];
+        }
+
+        // Check if image is stored in S3
+        if (isset($sessionResults['ReferenceImage']['S3Object'])) {
+            $s3Object = $sessionResults['ReferenceImage']['S3Object'];
+            $bucket = $s3Object['Bucket'] ?? env('AWS_S3_BUCKET');
+            $key = $s3Object['Name'] ?? null;
+
+            logger('Attempting S3 download', ['bucket' => $bucket, 'key' => $key]);
+
+            if (!$bucket || !$key) {
+                throw new \Exception('S3 object information incomplete');
+            }
+
+            // Download image from S3
+            $s3Client = new S3Client([
+                'version' => 'latest',
+                'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+            ]);
+
+            try {
+                $result = $s3Client->getObject([
+                    'Bucket' => $bucket,
+                    'Key' => $key,
+                ]);
+                $body = (string) $result->get('Body');
+                logger('S3 download successful', ['size' => strlen($body)]);
+                return $body;
+            } catch (\Exception $e) {
+                logger('S3 download failed', ['error' => $e->getMessage()]);
+                throw new \Exception('Failed to download reference image from S3: ' . $e->getMessage());
+            }
+        }
+
+        logger('No reference image found', ['ReferenceImage' => $sessionResults['ReferenceImage'] ?? 'not set']);
+        throw new \Exception('No reference image found in liveness session results');
+    }
+
+    /**
      * Verify face using Face Liveness session
      */
     public function verifyFaceWithLiveness(string $sessionId, string $userId, string $collectionId = 'users', float $threshold = 85.0): array
@@ -171,14 +225,13 @@ class RekognitionService
         // Get liveness session results
         $sessionResults = $this->getFaceLivenessSessionResults($sessionId);
         
-        if (!isset($sessionResults['ReferenceImage']['Bytes'])) {
-            throw new \Exception('No reference image found in liveness session results');
-        }
+        // Get the reference image bytes (either directly from response or from S3)
+        $imageBytes = $this->getReferenceImageBytes($sessionResults);
 
         // Search for matching face using the reference image from liveness session
         $result = $this->client->searchFacesByImage([
             'CollectionId' => $collectionId,
-            'Image' => ['Bytes' => $sessionResults['ReferenceImage']['Bytes']],
+            'Image' => ['Bytes' => $imageBytes],
             'FaceMatchThreshold' => $threshold,
             'MaxFaces' => 1,
         ]);

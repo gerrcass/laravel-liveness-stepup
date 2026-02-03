@@ -72,7 +72,14 @@ class RegisterController extends Controller
             }
             
             try {
-                $result = $rekognition->indexFaceFromLivenessSession($sessionId, (string)$user->id);
+                // If we have livenessResult from session, use it directly
+                // Otherwise, try to get it from AWS (this might fail if already consumed)
+                if ($livenessResult === null) {
+                    $livenessResult = $rekognition->getFaceLivenessSessionResults($sessionId);
+                }
+                
+                // Index the face from liveness session
+                $result = $rekognition->indexFaceFromLivenessSession($sessionId, (string)$user->id, 'users', $livenessResult);
                 
                 UserFace::create([
                     'user_id' => $user->id,
@@ -84,9 +91,9 @@ class RegisterController extends Controller
                 ]);
                 
                 // Clear session data
-                $request->session()->forget(['pending_liveness_session_id', 'pending_liveness_result']);
+                $request->session()->forget(['pending_liveness_session_id', 'pending_liveness_result', 'pending_liveness_confidence']);
             } catch (\Exception $e) {
-                // If liveness registration fails, delete the user and return error
+                // If registration fails, delete the user and return error
                 $user->delete();
                 return back()->withErrors(['liveness' => 'Face Liveness registration failed: ' . $e->getMessage()]);
             }

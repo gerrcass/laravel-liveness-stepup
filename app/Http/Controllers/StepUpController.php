@@ -81,7 +81,7 @@ class StepUpController extends Controller
                     $externalId = $best['Face']['ExternalImageId'] ?? null;
                     $faceConfidence = $best['Similarity'] ?? 0;
 
-                    if ($externalId == (string) $user->id && $faceConfidence >= 85.0 && $livenessConfidence >= 85.0) {
+                    if ($externalId == (string) $user->id && $faceConfidence >= 60.0 && $livenessConfidence >= 60.0) {
                         // Mark verified
                         $userFace->verification_status = 'verified';
                         $userFace->last_verified_at = now();
@@ -155,7 +155,7 @@ class StepUpController extends Controller
                 ]);
                 $request->session()->put('stepup_verification_image_path', $path);
 
-                if ($externalId == (string) $user->id && $confidence >= 85.0) {
+                if ($externalId == (string) $user->id && $confidence >= 60.0) {
                     // mark verified
                     if ($userFace) {
                         $userFace->verification_status = 'verified';

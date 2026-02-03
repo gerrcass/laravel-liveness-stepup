@@ -1,10 +1,12 @@
 # Amazon Rekognition Step-Up Authentication with Face Recognition & Face Liveness - Laravel Demo
 
-This project is a proof-of-concept demonstrating how to implement **step-up authentication** in a Laravel application using **Amazon Rekognition's Face Recognition** and **Face Liveness** features. This allows you to require an additional, high-assurance verification step for users attempting to access sensitive parts of your application. Users can register with either a reference face image or Face Liveness, and subsequent verifications use the corresponding method.
+This project is a proof-of-concept demonstrating how to implement **step-up authentication** in a Laravel application using **Amazon Rekognition's Face Recognition** and **Face Liveness** features. This allows you to require an additional, high-assurance verification step for users attempting to access sensitive parts of your application.
+
+Users can register with either a reference face image or Face Liveness, and subsequent verifications use the corresponding method.
 
 ## Table of Contents
 
-- [Amazon Rekognition Step-Up Authentication with Face Recognition & Face Liveness - Laravel Demo](#amazon-rekognition-step-up-authentication-with-face-recognition--face-liveness---laravel-demo)
+- [Amazon Rekognition Step-Up Authentication with Face Recognition \& Face Liveness - Laravel Demo](#amazon-rekognition-step-up-authentication-with-face-recognition--face-liveness---laravel-demo)
   - [Table of Contents](#table-of-contents)
   - [Project Overview](#project-overview)
   - [How it Works](#how-it-works)
@@ -17,6 +19,7 @@ This project is a proof-of-concept demonstrating how to implement **step-up auth
     - [Face Liveness Configuration](#face-liveness-configuration)
   - [Running the Application](#running-the-application)
   - [Key Application Flow](#key-application-flow)
+  - [Database Schema - user\_faces Table](#database-schema---user_faces-table)
   - [Project Structure](#project-structure)
 
 ## Project Overview
@@ -51,7 +54,8 @@ This project now supports two methods of face verification:
 1. User completes a Face Liveness challenge (video selfie with movement/light challenges)
 2. System extracts reference image from the liveness session
 3. Backend uses `SearchFacesByImage` to compare against the collection
-4. Verification succeeds if both liveness confidence >= 85% and face similarity >= 85%
+4. Verification succeeds if both liveness confidence >= 60% and face similarity >= 60%
+5. Note: Face Liveness confidence can vary based on lighting, camera quality, and user cooperation
 
 ## Core Technologies
 
@@ -65,8 +69,9 @@ This project now supports two methods of face verification:
     - **Session Management**: Verification status stored in session with configurable timeout
 - **Frontend**: 
     - **React**: For Face Liveness UI components
-    - **AWS Amplify UI**: Face Liveness detector component
+    - **AWS Amplify UI**: `@aws-amplify/ui-react-liveness` - `FaceLivenessDetectorCore` component
     - **Blade Templates**: For traditional forms and layouts
+    - **Vite**: Build system for compiling React assets
 - **Database**: Any Laravel-compatible database (e.g., MySQL, PostgreSQL, SQLite)
 - **Role-Based Access**: Uses `spatie/laravel-permission` to restrict step-up protected routes
 
@@ -141,6 +146,8 @@ Face Liveness sessions can optionally store audit images in S3. Configure the S3
 AWS_S3_BUCKET=your-face-liveness-bucket
 ```
 
+**Important**: When `AWS_S3_BUCKET` is configured, Face Liveness reference images and audit images are stored in S3 instead of being returned as binary data in the API response. The system automatically downloads the reference image from S3 when needed.
+
 You can also configure the step-up verification timeout:
 
 ```dotenv
@@ -170,6 +177,17 @@ The application will be available at `http://localhost:8000`.
     - For traditional: Upload a reference face image
     - For Face Liveness: Complete a video selfie challenge with movement/light instructions
     
+    **Face Liveness Registration Flow:**
+    1. Frontend creates session via `/api/rekognition/create-face-liveness-session-registration`
+    2. Backend generates temporary AWS credentials via STS (15-minute expiry)
+    3. User completes video selfie challenge in React component
+    4. Frontend callback calls `/api/rekognition/complete-liveness-registration-guest`
+    5. Backend calls `GetFaceLivenessSessionResults` FIRST (avoiding race condition)
+    6. Backend stores results in Laravel session
+    7. User submits registration form
+    8. Backend indexes face in Rekognition collection using stored results
+    9. UserFace record created with face_data and liveness_data
+    
 2.  **Login**: Standard username/password authentication
 
 3.  **Accessing Protected Routes**: Try to access a sensitive area (requires 'privileged' role)
@@ -180,6 +198,16 @@ The application will be available at `http://localhost:8000`.
     
 5.  **Access Granted**: Upon successful verification, access is granted for the configured timeout period
 
+## Database Schema - user_faces Table
+
+The `user_faces` table stores face verification data with the following key fields:
+
+- **face_data** (JSON): Contains Rekognition `IndexFaces` response. The `ExternalImageId` field stores the user's ID, enabling face matching during verification.
+- **liveness_data** (JSON): Contains complete Face Liveness session results including `SessionId`, `Confidence`, `ReferenceImage` (S3Object), and `AuditImages` for audit trail.
+- **verification_status**: Current verification state - `verified`, `pending`, or `failed`.
+- **registration_method**: Either `image` (traditional) or `liveness` (video selfie).
+- **last_verified_at**: Timestamp of last successful verification.
+
 ## Project Structure
 
 - `app/Http/Controllers/RekognitionController.php`: Handles Face Liveness API requests and completion
@@ -187,8 +215,10 @@ The application will be available at `http://localhost:8000`.
 - `app/Http/Controllers/Auth/RegisterController.php`: Updated to support both registration methods
 - `app/Services/RekognitionService.php`: Enhanced with Face Liveness methods
 - `app/Models/UserFace.php`: Updated to store registration method and liveness data
-- `resources/js/components/FaceLivenessDetector.jsx`: React component for Face Liveness UI
+- `resources/js/components/FaceLivenessDetector.jsx`: React component for Face Liveness UI with session management
+- `resources/js/app.js`: Main JavaScript entry point with global Face Liveness initialization function
 - `resources/views/auth/register.blade.php`: Registration form with method selection
 - `resources/views/auth/stepup.blade.php`: Step-up verification with method-specific UI
+- `resources/views/layouts/app.blade.php`: Main layout with CSRF token and Vite asset loading
 - `routes/web.php`: All application routes including Face Liveness endpoints
 - `database/migrations/*_add_face_liveness_support_to_user_faces_table.php`: Database schema updates
