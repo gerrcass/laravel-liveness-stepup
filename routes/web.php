@@ -37,19 +37,45 @@ Route::get('/dashboard', function () { return view('dashboard'); })->middleware(
 Route::get('/user/registered-face', function (\Illuminate\Http\Request $request) {
     $user = $request->user();
     $face = $user?->userFace;
-    $path = $face?->face_data['path'] ?? null;
-    if (!$path || !\Illuminate\Support\Facades\Storage::disk('local')->exists($path)) {
+    $faceData = $face?->face_data ?: [];
+    
+    // Check for S3 object first (new format), then local path (legacy format)
+    $s3Object = $faceData['s3_object'] ?? null;
+    $localPath = $faceData['path'] ?? null;
+    
+    if ($s3Object && isset($s3Object['Bucket']) && isset($s3Object['Name'])) {
+        // Serve from S3
+        $s3Client = new \Aws\S3\S3Client([
+            'version' => 'latest',
+            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+        ]);
+        
+        try {
+            $result = $s3Client->getObject([
+                'Bucket' => $s3Object['Bucket'],
+                'Key' => $s3Object['Name'],
+            ]);
+            $body = $result->get('Body');
+            $mime = $result->get('ContentType') ?: 'image/jpeg';
+            
+            return response($body, 200)->header('Content-Type', $mime)->header('Cache-Control', 'private, max-age=60');
+        } catch (\Exception $e) {
+            abort(404);
+        }
+    } elseif ($localPath && \Illuminate\Support\Facades\Storage::disk('local')->exists($localPath)) {
+        // Serve from local storage (legacy format)
+        $mime = \Illuminate\Support\Facades\Storage::disk('local')->mimeType($localPath) ?: 'image/jpeg';
+        return response()->stream(function () use ($localPath) {
+            $stream = \Illuminate\Support\Facades\Storage::disk('local')->readStream($localPath);
+            fpassthru($stream);
+            fclose($stream);
+        }, 200, [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'private, max-age=60',
+        ]);
+    } else {
         abort(404);
     }
-    $mime = \Illuminate\Support\Facades\Storage::disk('local')->mimeType($path) ?: 'image/jpeg';
-    return response()->stream(function () use ($path) {
-        $stream = \Illuminate\Support\Facades\Storage::disk('local')->readStream($path);
-        fpassthru($stream);
-        fclose($stream);
-    }, 200, [
-        'Content-Type' => $mime,
-        'Cache-Control' => 'private, max-age=60',
-    ]);
 })->middleware('auth')->name('user.registered_face');
 
 // Example special operation that requires privileged role + step-up verification

@@ -35,7 +35,10 @@
     @auth
         <div class="user-info">
             <span><strong>Bienvenido, {{ auth()->user()->name }}</strong> ({{ auth()->user()->email }})</span>
-            @if(auth()->user()->userFace && (auth()->user()->userFace->face_data['path'] ?? null))
+            @if(auth()->user()->userFace && (
+                (auth()->user()->userFace->face_data['path'] ?? null) ||
+                (auth()->user()->userFace->face_data['s3_object'] ?? null)
+            ))
                 <span> — Cara registrada:</span>
                 <img src="{{ route('user.registered_face') }}?t={{ time() }}" alt="Cara registrada" class="user-face-thumb" title="Imagen facial con la que te registraste (para referencia en pruebas)">
             @else

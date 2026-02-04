@@ -245,4 +245,48 @@ class RekognitionService
             'livenessConfidence' => $sessionResults['Confidence'] ?? 0,
         ];
     }
+
+    /**
+     * Store an uploaded image to S3 for traditional face registration
+     * 
+     * @param string $imagePath Local path to the image
+     * @param string $userId User ID to use in the S3 key
+     * @return array S3Object information (Bucket, Name)
+     */
+    public function storeImageToS3(string $imagePath, string $userId): array
+    {
+        $bucket = env('AWS_S3_BUCKET');
+        
+        if (!$bucket) {
+            throw new \Exception('S3 bucket not configured');
+        }
+
+        // Generate unique key with image-sessions prefix
+        $extension = pathinfo($imagePath, PATHINFO_EXTENSION) ?: 'jpg';
+        $key = sprintf('image-sessions/%s/%s.%s', $userId, uniqid(), $extension);
+
+        // Get image bytes
+        $imageBytes = file_get_contents($imagePath);
+
+        // Upload to S3
+        $s3Client = new S3Client([
+            'version' => 'latest',
+            'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+        ]);
+
+        $result = $s3Client->putObject([
+            'Bucket' => $bucket,
+            'Key' => $key,
+            'Body' => $imageBytes,
+            'ContentType' => mime_content_type($imagePath) ?: 'image/jpeg',
+            'ACL' => 'private',
+        ]);
+
+        logger('Image uploaded to S3', ['bucket' => $bucket, 'key' => $key]);
+
+        return [
+            'Bucket' => $bucket,
+            'Name' => $key,
+        ];
+    }
 }

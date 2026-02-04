@@ -28,7 +28,7 @@ class RegisterController extends Controller
             'password' => 'required|string|min:6|confirmed',
             'registration_method' => 'required|string|in:image,liveness',
             'face_image' => 'required_if:registration_method,image|image|max:5120',
-            'liveness_session_id' => 'required_if:registration_method,liveness|string',
+            'liveness_session_id' => ['exclude_if:registration_method,image', 'required_if:registration_method,liveness', 'string'],
             'role' => 'required|string|in:' . implode(',', $roleNames),
         ]);
 
@@ -41,22 +41,32 @@ class RegisterController extends Controller
         $user->assignRole($data['role']);
 
         if ($data['registration_method'] === 'image') {
-            // Traditional image-based registration
-            $path = $request->file('face_image')->store('faces');
-            $fullPath = storage_path('app/' . $path);
+            // Traditional image-based registration using S3
+            $tempPath = $request->file('face_image')->store('temp');
+            $fullPath = storage_path('app/' . $tempPath);
 
             try {
+                // Store image in S3
+                $s3Object = $rekognition->storeImageToS3($fullPath, (string)$user->id);
+                
+                // Index face in Rekognition collection
                 $index = $rekognition->indexFace($fullPath, (string)$user->id);
                 $faceIds = $index['FaceRecords'] ?? [];
             } catch (\Exception $e) {
                 $faceIds = [];
+                $s3Object = null;
+            }
+
+            // Clean up temp file
+            if (isset($tempPath) && \Illuminate\Support\Facades\Storage::exists($tempPath)) {
+                \Illuminate\Support\Facades\Storage::delete($tempPath);
             }
 
             UserFace::create([
                 'user_id' => $user->id,
                 'registration_method' => 'image',
                 'face_data' => [
-                    'path' => $path,
+                    's3_object' => $s3Object,
                     'indexed' => count($faceIds) > 0,
                     'face_records' => $faceIds,
                 ],
