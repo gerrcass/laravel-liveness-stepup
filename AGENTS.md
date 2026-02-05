@@ -90,8 +90,11 @@ This project is a Laravel-based proof-of-concept for **step-up authentication us
 - `resources/js/app.js`: Main JavaScript entry point with global Face Liveness initialization function.
 - `resources/views/auth/register.blade.php`: Registration form with method selection and Face Liveness integration.
 - `resources/views/auth/stepup.blade.php`: Step-up verification with method-specific UI (image upload or Face Liveness).
+- `resources/views/stepup_post_redirect.blade.php`: Intermediate page for POST redirects in step-up flow.
+- `resources/views/special_operation_result.blade.php`: Success page showing verification details.
 - `resources/views/layouts/app.blade.php`: Main layout with CSRF token and Vite asset loading.
 - `.env.example`: The template for environment variables. Refer to this for required AWS settings.
+- `lessons.md`: Documented lessons learned during implementation.
 
 ## Agent Instructions & Constraints
 
@@ -106,8 +109,12 @@ This project is a Laravel-based proof-of-concept for **step-up authentication us
 - **S3 Image Storage**: When `AWS_S3_BUCKET` is configured, Face Liveness sessions store reference images and audit images in S3. The system automatically downloads images from S3 when needed for indexing or verification.
 - **Binary Data Handling**: Face Liveness session results may contain binary image data that cannot be JSON encoded. The system implements `cleanLivenessResultForStorage()` to remove binary data before storage and `getReferenceImageBytes()` to download from S3 when needed.
 - **S3Object vs Bytes**: When `AWS_S3_BUCKET` is configured, Face Liveness results include `S3Object` instead of `Bytes` in `ReferenceImage`. The `getReferenceImageBytes()` method handles both cases transparently.
-- **CSRF Token**: Ensure that the `<meta name="csrf-token">` tag is present in the HTML layout for all pages that use Face Liveness API. The React component reads this tag to include the token in API requests.
+- **CSRF Token**: Ensure that the `<meta name="csrf-token">` tag is present in the HTML layout for all pages that use Face Liveness API. The React component reads this token to include in API requests.
 - **Race Condition Handling**: The AWS Amplify UI component internally calls `GetFaceLivenessSessionResults` which can cause a race condition. The `completeLivenessRegistrationGuest` endpoint calls this API FIRST and stores results in session. The React component callback suppresses component errors when backend has already processed successfully.
+- **Conditional Validation**: When using `Rule::excludeIf` or `exclude_if`, empty fields are completely skipped during validation, preventing the `ConvertEmptyStringsToNull` middleware from causing "must be a string" errors.
+- **Code Scope**: Always verify that error handling code is placed at the correct scope level. Code inside a conditional only runs when that condition is true. Error handlers should typically be outside the main conditional block.
+- **POST Redirects**: When redirecting after successful verification for POST routes, use `stepup_post_redirect` view with hidden form and JavaScript auto-submit to maintain POST data for protected operations.
+- **Session Data**: Generate and store verification data in session BEFORE any redirects to ensure it's available throughout the flow.
 
 ## Database Schema - user_faces Table
 

@@ -30,6 +30,7 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
 
 Route::get('/step-up', [StepUpController::class, 'show'])->middleware('auth')->name('stepup.show');
 Route::get('/step-up/attempt-image', [StepUpController::class, 'attemptImage'])->middleware('auth')->name('stepup.attempt_image');
+Route::get('/step-up/error-image', [StepUpController::class, 'errorImage'])->middleware('auth')->name('stepup.error_image');
 Route::post('/step-up/verify', [StepUpController::class, 'verify'])->middleware('auth')->name('stepup.verify');
 Route::get('/dashboard', function () { return view('dashboard'); })->middleware('auth')->name('dashboard');
 
@@ -81,7 +82,16 @@ Route::get('/user/registered-face', function (\Illuminate\Http\Request $request)
 // Example special operation that requires privileged role + step-up verification
 Route::post('/special-operation', function () {
     $user = auth()->user();
-    $verification = session('stepup_verification_result');
+    // Use flash data first, then fall back to session
+    $verification = session('verification') ?? session('stepup_verification_result');
+    
+    logger('special-operation POST', [
+        'user_id' => $user->id,
+        'verification_data' => $verification,
+        'has_flash_verification' => session()->has('verification'),
+        'has_session_verification' => session()->has('stepup_verification_result'),
+    ]);
+    
     return view('special_operation_result', [
         'user' => $user,
         'verification' => $verification,
@@ -91,7 +101,16 @@ Route::post('/special-operation', function () {
 // GET route for special operation (after Face Liveness verification)
 Route::get('/special-operation', function () {
     $user = auth()->user();
-    $verification = session('stepup_verification_result');
+    // Use flash data first, then fall back to session
+    $verification = session('verification') ?? session('stepup_verification_result');
+    
+    logger('special-operation GET', [
+        'user_id' => $user->id,
+        'verification_data' => $verification,
+        'has_flash_verification' => session()->has('verification'),
+        'has_session_verification' => session()->has('stepup_verification_result'),
+    ]);
+    
     return view('special_operation_result', [
         'user' => $user,
         'verification' => $verification,

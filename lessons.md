@@ -379,3 +379,145 @@ The component outputs the result to the console, but you should also check the U
 3. **Movement**: Follow the on-screen instructions for head movement.
 4. **Consistency**: Look similar to your registration photo (glasses, expression, etc.).
 5. **Background**: Use a plain, neutral background.
+
+## Laravel Form Validation with Conditional Fields
+
+### Issue: Middleware ConvertEmptyStringsToNull Breaking Conditional Validation
+
+**Problem**: When using Laravel's `exclude_if` validation rule, empty hidden fields were being converted to `null` by the `ConvertEmptyStringsToNull` middleware, causing validation to fail with "The field must be a string" error.
+
+**Symptom**: Error message: "The liveness session id field must be a string."
+
+**Solution**: Use `exclude_if:registration_method,image` to completely skip validation when the condition is met:
+```php
+$validated = $request->validate([
+    'name' => 'required|string|max:255',
+    'email' => 'required|string|email|max:255|unique:users',
+    'password' => 'required|string|min:8|confirmed',
+    'liveness_session_id' => [
+        Rule::excludeIf(fn() => $request->registration_method === 'image'),
+        'string',
+    ],
+]);
+```
+
+**Key Insight**: `exclude_if` and `exclude_unless` completely skip validation rules when the condition is met, preventing the middleware from converting empty strings to null for those fields.
+
+## Code Placement in Conditional Logic
+
+### Issue: Code Block Inside Wrong Conditional
+
+**Problem**: A code block for handling "no face match found" was placed **inside** an `if (count($matches) > 0)` block, causing it to never execute when no face matches were found.
+
+**Symptom**: Users with invalid faces saw a blank page instead of an error message.
+
+**Solution**: Move the error handling code **outside** the conditional block:
+```php
+// WRONG - code inside the if, never runs when count is 0
+if (count($matches) > 0) {
+    // ... match handling ...
+    
+    // No face match found - THIS CODE NEVER RUNS!
+    return redirect()->route('stepup.show')->withErrors([...]);
+}
+
+// CORRECT - code outside the if
+if (count($matches) > 0) {
+    // ... match handling ...
+}
+
+// No face match found - THIS CODE RUNS when count is 0
+return redirect()->route('stepup.show')->withErrors([...]);
+```
+
+**Key Insight**: Always verify that error handling code is placed at the correct scope level. Code inside a conditional only runs when that condition is true.
+
+## Redirect Flow Differences: Valid vs Invalid Faces
+
+### Behavior Difference
+
+**Observation**: Verification with valid faces appears slower than with invalid faces.
+
+**Explanation**: The flows are fundamentally different:
+
+- **Invalid faces**: Direct redirect to `/step-up` with error session data (1 request)
+- **Valid faces**: Redirect through `stepup_post_redirect` with hidden form + JavaScript (2+ requests)
+
+**Valid Face Flow**:
+```
+1. POST /step-up/verify → Verification successful
+2. Return view('stepup_post_redirect') with hidden form
+3. Browser loads page, JavaScript auto-submits form
+4. POST /special-operation → Success page
+```
+
+**Invalid Face Flow**:
+```
+1. POST /step-up/verify → Verification failed
+2. Redirect to /step-up (GET) with error data
+3. Page loads with error message
+```
+
+**Key Insight**: The extra step for valid faces is necessary to maintain POST data for protected operations. The performance difference is expected behavior, not a bug.
+
+## Session Data Passing Across Redirects
+
+### Issue: Verification Data Lost in POST Flow
+
+**Problem**: Verification data was generated after the redirect to `stepup_post_redirect`, causing it to be unavailable when the form was submitted to `/special-operation`.
+
+**Solution**: Generate and store verification data BEFORE any redirect:
+```php
+// Generate verification data FIRST
+$verificationData = [
+    'method' => 'image',
+    'confidence' => $confidence,
+    // ... other fields
+];
+
+// Store in session for both GET and POST flows
+$request->session()->put('stepup_verification_result', $verificationData);
+
+// Now safe to redirect
+return view('stepup_post_redirect', compact('targetUrl', 'inputs', 'verificationData'));
+```
+
+**Key Insight**: When using intermediate redirect pages (like `stepup_post_redirect`), verification data must be stored in session BEFORE returning the view, not after.
+
+## Form Submission Methods: Normal vs AJAX
+
+### Issue: Form Being Submitted via fetch Instead of Normal Submit
+
+**Problem**: The verification form was being submitted using `fetch` (AJAX) instead of normal browser form submission, causing redirects to not work properly.
+
+**Symptom**: User was redirected to `/step-up/verify` (the POST endpoint) with a blank page instead of being redirected to `/step-up` with errors.
+
+**Investigation**: Check browser DevTools Network tab for the actual request method being used.
+
+**Solution**: Use explicit redirects instead of `back()`:
+```php
+// Use explicit route redirect instead of back()
+return redirect()->route('stepup.show')->withErrors(['face' => 'Verification failed']);
+```
+
+**Key Insight**: `back()->withErrors()` relies on HTTP_REFERER which may not always be reliable. Using explicit `redirect()->route()` is more robust.
+
+## Debugging Techniques for Laravel Controllers
+
+### Adding Strategic Logs
+
+When debugging complex controller logic, add logs at key points:
+```php
+public function verify(Request $request, RekognitionService $rekognition)
+{
+    logger('verify - called');
+    logger('verify - registrationMethod: ' . $registrationMethod);
+    logger('verify - entering image verification block');
+    logger('verify - validation passed');
+    logger('verify - searchFace completed', ['FaceMatches' => count($result['FaceMatches'] ?? [])]);
+    logger('verify - matches count: ' . count($matches));
+    logger('verify - no face match found, redirecting...');
+}
+```
+
+**Key Insight**: Progressive logging helps identify exactly where code execution stops or takes a different path than expected.

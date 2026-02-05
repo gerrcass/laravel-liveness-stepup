@@ -48,7 +48,9 @@ This project now supports two methods of face verification:
 **Traditional Image Verification:**
 1. User uploads a live image through a form
 2. Backend uses Rekognition's `SearchFacesByImage` API to compare against the collection
-3. Verification succeeds if similarity confidence >= 85% and user ID matches
+3. Verification succeeds if similarity confidence >= 60% and user ID matches
+4. Upon success, user is redirected to the intended protected page
+5. Upon failure, user sees detailed error message with confidence scores and technical details
 
 **Face Liveness Verification:**
 1. User completes a Face Liveness challenge (video selfie with movement/light challenges)
@@ -214,11 +216,14 @@ The `user_faces` table stores face verification data with the following key fiel
 - `app/Http/Controllers/StepUpController.php`: Manages step-up verification flow for both methods
 - `app/Http/Controllers/Auth/RegisterController.php`: Updated to support both registration methods
 - `app/Services/RekognitionService.php`: Enhanced with Face Liveness methods
-- `app/Models/UserFace.php`: Updated to store registration method and liveness data
-- `resources/js/components/FaceLivenessDetector.jsx`: React component for Face Liveness UI with session management
+- `app/Models/UserFace.php`: Model for user face data with `face_data`, `liveness_data`, `verification_status`, `registration_method`, and `last_verified_at` fields
+- `resources/js/components/FaceLivenessDetector.jsx`: React component for Face Liveness UI with session management and error handling
 - `resources/js/app.js`: Main JavaScript entry point with global Face Liveness initialization function
-- `resources/views/auth/register.blade.php`: Registration form with method selection
-- `resources/views/auth/stepup.blade.php`: Step-up verification with method-specific UI
+- `resources/views/auth/register.blade.php`: Registration form with method selection and Face Liveness integration
+- `resources/views/auth/stepup.blade.php`: Step-up verification with method-specific UI (image upload or Face Liveness)
+- `resources/views/stepup_post_redirect.blade.php`: Intermediate page for POST redirects in step-up flow
+- `resources/views/special_operation_result.blade.php`: Success page showing verification details
 - `resources/views/layouts/app.blade.php`: Main layout with CSRF token and Vite asset loading
 - `routes/web.php`: All application routes including Face Liveness endpoints
 - `database/migrations/*_add_face_liveness_support_to_user_faces_table.php`: Database schema updates
+- `lessons.md`: Documented lessons learned during implementation
