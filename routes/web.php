@@ -30,6 +30,7 @@ Route::post('/logout', [LoginController::class, 'logout'])->name('logout');
 
 Route::get('/step-up', [StepUpController::class, 'show'])->middleware('auth')->name('stepup.show');
 Route::get('/step-up/attempt-image', [StepUpController::class, 'attemptImage'])->middleware('auth')->name('stepup.attempt_image');
+Route::get('/step-up/liveness-verification-image', [StepUpController::class, 'livenessVerificationImage'])->middleware('auth')->name('stepup.liveness_verification_image');
 Route::get('/step-up/error-image', [StepUpController::class, 'errorImage'])->middleware('auth')->name('stepup.error_image');
 Route::post('/step-up/verify', [StepUpController::class, 'verify'])->middleware('auth')->name('stepup.verify');
 Route::get('/dashboard', function () { return view('dashboard'); })->middleware('auth')->name('dashboard');
@@ -39,10 +40,19 @@ Route::get('/user/registered-face', function (\Illuminate\Http\Request $request)
     $user = $request->user();
     $face = $user?->userFace;
     $faceData = $face?->face_data ?: [];
+    $livenessData = $face?->liveness_data ?: [];
     
     // Check for S3 object first (new format), then local path (legacy format)
     $s3Object = $faceData['s3_object'] ?? null;
     $localPath = $faceData['path'] ?? null;
+    
+    // For liveness users, check ReferenceImage in liveness_data
+    if (!$s3Object && !$localPath && $face?->registration_method === 'liveness') {
+        $livenessS3Object = $livenessData['ReferenceImage']['S3Object'] ?? null;
+        if ($livenessS3Object && isset($livenessS3Object['Bucket']) && isset($livenessS3Object['Name'])) {
+            $s3Object = $livenessS3Object;
+        }
+    }
     
     if ($s3Object && isset($s3Object['Bucket']) && isset($s3Object['Name'])) {
         // Serve from S3

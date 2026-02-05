@@ -65,6 +65,37 @@ class StepUpController extends Controller
         ]);
     }
 
+    /**
+     * Serve the Face Liveness verification reference image from S3.
+     */
+    public function livenessVerificationImage(Request $request): StreamedResponse|\Illuminate\Http\Response
+    {
+        $s3Object = $request->session()->get('stepup_liveness_verification_image');
+
+        if (!$s3Object || !isset($s3Object['Bucket']) || !isset($s3Object['Name'])) {
+            abort(404);
+        }
+
+        try {
+            $s3Client = new \Aws\S3\S3Client([
+                'version' => 'latest',
+                'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+            ]);
+
+            $result = $s3Client->getObject([
+                'Bucket' => $s3Object['Bucket'],
+                'Key' => $s3Object['Name'],
+            ]);
+
+            $body = $result->get('Body');
+            $mime = $result->get('ContentType') ?: 'image/jpeg';
+
+            return response($body, 200)->header('Content-Type', $mime)->header('Cache-Control', 'private, max-age=60');
+        } catch (\Exception $e) {
+            abort(404);
+        }
+    }
+
     public function verify(Request $request, RekognitionService $rekognition)
     {
         $user = Auth::user();
@@ -100,18 +131,8 @@ class StepUpController extends Controller
 
                         $request->session()->put('stepup_verified_at', now()->toDateTimeString());
 
-                        // Redirect to intended URL
-                        $intended = $request->session()->pull('stepup_intended');
-                        if ($intended && isset($intended['method']) && strtoupper($intended['method']) === 'POST') {
-                            $targetUrl = $intended['url'];
-                            $inputs = $intended['input'] ?? [];
-                            return view('stepup_post_redirect', compact('targetUrl', 'inputs'));
-                        }
-
-                        $target = $intended['url'] ?? route('dashboard');
-                        
-                        // Store verification result for success page
-                        $request->session()->put('stepup_verification_result', [
+                        // Generate verification data FIRST
+                        $verificationData = [
                             'method' => 'liveness',
                             'liveness_confidence' => $livenessConfidence,
                             'face_confidence' => $faceConfidence,
@@ -121,7 +142,20 @@ class StepUpController extends Controller
                             'checked_at' => now()->toDateTimeString(),
                             'rekognition_response' => $searchResult,
                             'liveness_result' => $livenessResult,
-                        ]);
+                        ];
+                        
+                        // Store in session
+                        $request->session()->put('stepup_verification_result', $verificationData);
+
+                        // Redirect to intended URL
+                        $intended = $request->session()->pull('stepup_intended');
+                        if ($intended && isset($intended['method']) && strtoupper($intended['method']) === 'POST') {
+                            $targetUrl = $intended['url'];
+                            $inputs = $intended['input'] ?? [];
+                            return view('stepup_post_redirect', compact('targetUrl', 'inputs', 'verificationData'));
+                        }
+
+                        $target = $intended['url'] ?? route('dashboard');
                         
                         return redirect($target)->with('status', 'Step-up verification passed with Face Liveness');
                     }

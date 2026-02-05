@@ -521,3 +521,179 @@ public function verify(Request $request, RekognitionService $rekognition)
 ```
 
 **Key Insight**: Progressive logging helps identify exactly where code execution stops or takes a different path than expected.
+
+## Enhanced Error UI for Step-Up Verification
+
+### Problem: Generic Error Messages
+
+**Problem**: Users saw only generic error messages like "Verification failed" without actionable feedback.
+
+**Solution**: Enhanced error UI with technical details and visual indicators:
+```php
+// In Blade template - Error area with detailed feedback
+@if($errors->any() || session('stepup_error_details'))
+    <div style="color:#721c24; background-color:#f8d7da; border:1px solid #f5c6cb;">
+        <h3 style="margin-top:0;">Face Verification Failed</h3>
+        <p><strong>Reason:</strong> {{ $errorMessage }}</p>
+
+        {{-- Technical details with color-coded confidence scores --}}
+        @if($livenessConf)
+            <p>
+                <strong>Liveness Confidence:</strong>
+                <span style="color: {{ $livenessConf >= 60 ? '#28a745' : '#dc3545' }};">
+                    {{ number_format($livenessConf, 1) }}%
+                    {{ $livenessConf >= 60 ? '(passed)' : '(below 60% threshold)' }}
+                </span>
+            </p>
+        @endif
+
+        {{-- Accordion with raw API response --}}
+        <details>
+            <summary>Show raw Rekognition API response</summary>
+            <pre>{{ json_encode($errorDetails, JSON_PRETTY_PRINT) }}</pre>
+        </details>
+    </div>
+@endif
+```
+
+**Key Insight**: Users need actionable feedback with confidence scores to understand why verification failed and how to improve.
+
+### Displaying Failed Verification Image
+
+**Problem**: Users couldn't see what image they submitted during a failed verification attempt.
+
+**Solution**: Add endpoint to serve error images from session storage:
+```php
+// StepUpController.php
+public function errorImage(Request $request): StreamedResponse
+{
+    $path = $request->session()->get('stepup_error_image_path');
+    
+    if (!$path || !Storage::disk('local')->exists($path)) {
+        abort(404);
+    }
+    
+    return response()->stream(function () use ($path) {
+        $stream = Storage::disk('local')->readStream($path);
+        fpassthru($stream);
+        fclose($stream);
+    }, 200, ['Content-Type' => 'image/jpeg']);
+}
+```
+
+**Key Insight**: Showing users their submitted image helps them understand why verification failed (e.g., blurry photo, poor lighting).
+
+## Enhanced Success UI for Step-Up Verification
+
+### Problem: Inconsistent Success Messages
+
+**Problem**: Success page showed different information for liveness vs image users, making it hard to understand what happened.
+
+**Solution**: Unified success UI with method-specific details:
+```php
+// In Blade template
+<div style="color:#155724; background-color:#d4edda; border:1px solid #c3e6cb;">
+    <h3 style="margin-top:0;">✅ Verification Successful</h3>
+    <p>
+        <strong>Your identity has been verified successfully</strong>
+        @if($method === 'liveness')
+            via Face Liveness
+        @else
+            via Image-based verification
+        @endif
+    </p>
+
+    {{-- Technical details --}}
+    @if($livenessConfidence !== null)
+        <p><strong>Liveness Confidence:</strong> {{ number_format($livenessConfidence, 1) }}%</p>
+    @endif
+    @if($confidence)
+        <p><strong>Face Match Confidence:</strong> {{ number_format($confidence, 1) }}%</p>
+    @endif
+</div>
+```
+
+**Key Insight**: Consistent UI with clear success indicators improves user confidence in the verification system.
+
+## Session Data Passing in POST Redirect Flows
+
+### Problem: Verification Data Lost in stepup_post_redirect
+
+**Problem**: When using `stepup_post_redirect` to maintain POST data, verification data was generated after the redirect, causing it to be unavailable.
+
+**Solution**: Store verification data in session BEFORE returning the redirect view:
+```php
+// WRONG - data stored after redirect
+return view('stepup_post_redirect', ...);
+$request->session()->put('stepup_verification_result', $data); // Too late!
+
+// CORRECT - data stored before redirect
+$request->session()->put('stepup_verification_result', $verificationData);
+return view('stepup_post_redirect', ...);
+```
+
+Also pass verification data as hidden input:
+```php
+{{-- In stepup_post_redirect.blade.php --}}
+@if(isset($verificationData))
+    <input type="hidden" name="verification_data" value='{{ json_encode($verificationData) }}'>
+@endif
+```
+
+**Key Insight**: When using intermediate redirect pages, all data must be available BEFORE the redirect since the next page load is a new request.
+
+## Multiple Session Keys for Verification Data
+
+### Problem: Verification Data Not Available in All Flows
+
+**Problem**: Different flows (GET vs POST, liveness vs image) used different session keys, causing data to be unavailable in some cases.
+
+**Solution**: Use fallback logic and consistent session keys:
+```php
+// Check flash data first, then session data
+$verification = session('verification') ?? session('stepup_verification_result');
+
+// Log to debug
+logger('special-operation POST', [
+    'user_id' => $user->id,
+    'verification_data' => $verification,
+    'has_flash_verification' => session()->has('verification'),
+    'has_session_verification' => session()->has('stepup_verification_result'),
+]);
+```
+
+**Key Insight**: When supporting multiple flows (GET/POST, AJAX/normal submit), use consistent session keys and fallback logic.
+
+## Layout Method Label Display
+
+### Problem: Users Couldn't Tell Which Registration Method They Used
+
+**Problem": After Face Liveness integration, users registered with different methods but the UI didn't indicate which method they used.
+
+**Solution**: Add method label next to face thumbnail:
+```php
+@if($hasFaceImage)
+    @php
+        $methodLabel = $userFace && $userFace->registration_method === 'liveness' 
+            ? 'liveness' 
+            : 'imagen';
+    @endphp
+    <span> — Cara registrada ({{ $methodLabel }}):</span>
+    <img src="{{ $faceImageUrl }}" alt="Cara registrada">
+@endif
+```
+
+**Key Insight**: Clear method indicators help users understand their authentication status and expected verification flow.
+
+## Test Images Cleanup
+
+### Issue: Accumulated Test Images
+
+**Problem**: Test images (j1.jpg, j2.jpg, j3.jpg) were accidentally committed to the repository.
+
+**Solution**: Delete test images and add to .gitignore if needed:
+```bash
+git rm public/caras/j1.jpg public/caras/j2.jpg public/caras/j3.jpg
+```
+
+**Key Insight**: Keep test files out of the repository or use a dedicated test data directory.

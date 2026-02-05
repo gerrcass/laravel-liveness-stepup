@@ -140,6 +140,12 @@
                     livenessVerificationCompleted = true;
                     window.location.href = '{{ session("stepup_intended.url", route("dashboard")) }}';
                 } else {
+                    // Verification failed - submit form to show error area
+                    console.log('Face Liveness verification failed, submitting form...', result);
+                    if (result.sessionId) {
+                        document.getElementById('liveness_session_id').value = result.sessionId;
+                        document.getElementById('liveness-verification-form').submit();
+                    }
                 }
             };
 

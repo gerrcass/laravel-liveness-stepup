@@ -33,14 +33,33 @@
     </nav>
 
     @auth
+        @php
+            $user = auth()->user();
+            $userFace = $user->userFace ?? null;
+            $hasFaceImage = false;
+            $faceImageUrl = null;
+            
+            if ($userFace) {
+                // Check for image method (traditional)
+                if (($userFace->face_data['path'] ?? null) || ($userFace->face_data['s3_object'] ?? null)) {
+                    $hasFaceImage = true;
+                    $faceImageUrl = route('user.registered_face') . '?t=' . time();
+                }
+                // Check for liveness method
+                elseif ($userFace->registration_method === 'liveness' && ($userFace->liveness_data['ReferenceImage']['S3Object'] ?? null)) {
+                    $hasFaceImage = true;
+                    $faceImageUrl = route('user.registered_face') . '?t=' . time();
+                }
+            }
+        @endphp
         <div class="user-info">
-            <span><strong>Bienvenido, {{ auth()->user()->name }}</strong> ({{ auth()->user()->email }})</span>
-            @if(auth()->user()->userFace && (
-                (auth()->user()->userFace->face_data['path'] ?? null) ||
-                (auth()->user()->userFace->face_data['s3_object'] ?? null)
-            ))
-                <span> — Cara registrada:</span>
-                <img src="{{ route('user.registered_face') }}?t={{ time() }}" alt="Cara registrada" class="user-face-thumb" title="Imagen facial con la que te registraste (para referencia en pruebas)">
+            <span><strong>Bienvenido, {{ $user->name }}</strong> ({{ $user->email }})</span>
+            @if($hasFaceImage)
+                @php
+                    $methodLabel = $userFace && $userFace->registration_method === 'liveness' ? 'liveness' : 'imagen';
+                @endphp
+                <span> — Cara registrada ({{ $methodLabel }}):</span>
+                <img src="{{ $faceImageUrl }}" alt="Cara registrada" class="user-face-thumb" title="Imagen facial con la que te registraste">
             @else
                 <span style="color:#888;"> — Sin cara registrada</span>
             @endif

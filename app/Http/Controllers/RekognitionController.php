@@ -234,13 +234,25 @@ class RekognitionController extends Controller
                         // Mark session as verified
                         $request->session()->put('stepup_verified_at', now()->toDateTimeString());
 
-                        // Update user face record
-                        $userFace = $user->userFace;
-                        if ($userFace) {
-                            $userFace->verification_status = 'verified';
-                            $userFace->last_verified_at = now();
-                            $userFace->save();
+                        // Store verification image S3 reference for UI
+                        $livenessS3Object = $livenessResult['ReferenceImage']['S3Object'] ?? null;
+                        if ($livenessS3Object) {
+                            $request->session()->put('stepup_liveness_verification_image', $livenessS3Object);
                         }
+
+                        // Store verification result for success page
+                        $verificationData = [
+                            'method' => 'liveness',
+                            'liveness_confidence' => $livenessConfidence,
+                            'face_confidence' => $faceConfidence,
+                            'face_id' => $match['Face']['FaceId'] ?? null,
+                            'external_id' => $matchedExternalId,
+                            'user_id' => (string) $user->id,
+                            'checked_at' => now()->toDateTimeString(),
+                            'rekognition_response' => $searchResult,
+                            'liveness_result' => $livenessResult,
+                        ];
+                        $request->session()->put('stepup_verification_result', $verificationData);
 
                         logger('Verification SUCCESS for current user', [
                             'userId' => $user->id,

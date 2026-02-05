@@ -75,6 +75,11 @@
                     <p style="margin:0 0 0.5rem 0; font-weight:bold;">Image used for verification:</p>
                     <img src="{{ route('stepup.attempt_image') }}?t={{ time() }}" alt="Verification image" style="max-width:300px; max-height:300px; border:1px solid #c3e6cb; border-radius:4px;">
                 </div>
+            @elseif($method === 'liveness')
+                <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid #c3e6cb;">
+                    <p style="margin:0 0 0.5rem 0; font-weight:bold;">Reference image from Face Liveness verification:</p>
+                    <img src="{{ route('stepup.liveness_verification_image') }}?t={{ time() }}" alt="Face Liveness verification image" style="max-width:300px; max-height:300px; border:1px solid #c3e6cb; border-radius:4px;">
+                </div>
             @endif
         </div>
     @else
