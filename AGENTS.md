@@ -13,8 +13,8 @@ This project is a Laravel-based proof-of-concept for **step-up authentication us
 - **Step-Up Auth**:
     - Middleware: `app/Http/Middleware/RequireStepUp.php` checks if a user has recently passed a face verification check.
     - Session: A successful check is stored in the user's session (`stepup_verified_at`) with a configurable timeout (default 900 seconds, configurable via `STEPUP_TIMEOUT` environment variable).
-    - **Traditional Verification**: Uses Rekognition's `SearchFacesByImage` API to compare uploaded images against a face collection. Requires confidence >= 85% and matching `ExternalImageId` (user ID).
-    - **Face Liveness Verification**: Uses `GetFaceLivenessSessionResults` to extract reference image from completed liveness session, then searches the face collection using `SearchFacesByImage`. Requires both liveness confidence >= 85% and face similarity >= 85%.
+    - **Traditional Verification**: Uses Rekognition's `SearchFacesByImage` API to compare uploaded images against a face collection. Requires confidence >= 60% and matching `ExternalImageId` (user ID).
+    - **Face Liveness Verification**: Uses `GetFaceLivenessSessionResults` to extract reference image from completed liveness session, then searches the face collection using `SearchFacesByImage`. Requires both liveness confidence >= 60% and face similarity >= 60%.
 - **Amazon Web Services**:
     - **Rekognition**: The core service for face recognition and liveness detection.
         - Service class: `app/Services/RekognitionService.php`. This is the primary interface for all Rekognition API calls.
@@ -73,7 +73,7 @@ This project is a Laravel-based proof-of-concept for **step-up authentication us
     3. The application will redirect you to the `/step-up` route if verification hasn't been completed recently (within `STEPUP_TIMEOUT` seconds).
     4. **For traditional users**: Upload a face image that matches the registered user's face.
     5. **For Face Liveness users**: Click "Start Face Liveness Check" and complete the Face Liveness challenge.
-    6. Upon successful verification (confidence >= 85% and matching user ID), the backend marks the session as verified, and you will be redirected to the originally requested sensitive page.
+    6. Upon successful verification (confidence >= 60% and matching user ID), the backend marks the session as verified, and you will be redirected to the originally requested sensitive page.
     7. Subsequent access attempts within the timeout period will bypass verification.
 
 ## Key Files & Directories

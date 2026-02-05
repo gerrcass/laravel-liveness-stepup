@@ -142,7 +142,11 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                     message: result.message || 'Verification failed',
                     livenessConfidence: result.livenessConfidence,
                     faceConfidence: result.faceConfidence,
-                    threshold: result.threshold || 60
+                    threshold: result.threshold || 60,
+                    livenessResult: result.livenessResult,
+                    searchResult: result.searchResult,
+                    searchError: result.searchError,
+                    referenceImageUrl: result.referenceImageUrl
                 });
 
                 if (errorType === 'low_liveness_confidence') {
@@ -150,6 +154,9 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                     setShowHints(true);
                 } else if (errorType === 'face_not_matched') {
                     setError('Face did not match registered image');
+                    setShowHints(true);
+                } else if (errorType === 'face_not_found') {
+                    setError('No faces detected in the image');
                     setShowHints(true);
                 } else {
                     setError(result.message || 'Verification failed');
@@ -172,6 +179,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
     }, [sessionId, purpose, onComplete, onError]);
 
     const getErrorType = (result) => {
+        // Check for search error (no faces detected)
+        if (result.searchError && result.searchError.includes('no faces')) {
+            return 'face_not_found';
+        }
         if (result.livenessConfidence !== undefined && result.livenessConfidence < (result.threshold || 60)) {
             return 'low_liveness_confidence';
         }
@@ -237,7 +248,9 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
             face_not_found: [
                 'Position your face within the frame guidelines',
                 'Ensure your face is clearly visible',
-                'Avoid covering your face with hair or hands'
+                'Avoid covering your face with hair or hands',
+                'Make sure there is a face in front of the camera',
+                'Try moving closer to the camera'
             ],
             component: [
                 'Refresh the page and try again',
@@ -300,6 +313,8 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
 
     if (error) {
         const hints = errorDetails ? getHintsForError(errorDetails.type) : [];
+        const timestamp = new Date().toLocaleString();
+        const showReferenceImage = errorDetails?.referenceImageUrl;
 
         return (
             <div style={{
@@ -307,10 +322,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                 border: '1px solid #f5c6cb',
                 borderRadius: '8px',
                 backgroundColor: '#fff5f5',
-                maxWidth: '600px',
+                // maxWidth: '600px',
                 margin: '0 auto'
             }}>
-                <h3 style={{ color: '#c82333', marginTop: 0 }}>Verification Failed</h3>
+                <h3 style={{ color: '#c82333', marginTop: 0 }}>❌ Verification Failed</h3>
                 <p style={{ color: '#721c24', fontSize: '16px' }}>{error}</p>
 
                 {errorDetails && (errorDetails.livenessConfidence !== undefined || errorDetails.faceConfidence !== undefined) && (
@@ -321,6 +336,9 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                         margin: '1rem 0'
                     }}>
                         <h4 style={{ marginTop: 0 }}>Analysis Results</h4>
+                        <p style={{ margin: '0.25rem 0', color: '#6c757d' }}>
+                            <strong>Verified at:</strong> {timestamp}
+                        </p>
                         {errorDetails.livenessConfidence !== undefined && (
                             <p style={{
                                 color: errorDetails.livenessConfidence >= (errorDetails.threshold || 60) ? '#28a745' : '#dc3545'
@@ -337,6 +355,59 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                                 <span style={{color: '#6c757d', fontSize: '0.9em'}}> ({(errorDetails.threshold || 60)}% required)</span>
                             </p>
                         )}
+                    </div>
+                )}
+
+                {/* Raw API responses from AWS Rekognition */}
+                {errorDetails?.livenessResult && (
+                    <details style={{ marginTop: '1rem' }}>
+                        <summary style={{ cursor: 'pointer', color: '#721c24', fontWeight: 'bold' }}>
+                            GetFaceLivenessSessionResults (Face Liveness API)
+                        </summary>
+                        <pre style={{
+                            background: '#fff',
+                            padding: '0.75rem',
+                            overflow: 'auto',
+                            maxHeight: '300px',
+                            marginTop: '0.5rem',
+                            border: '1px solid #f5c6cb',
+                            fontSize: '0.85rem'
+                        }}>
+                            {JSON.stringify(errorDetails.livenessResult, null, 2)}
+                        </pre>
+                    </details>
+                )}
+
+                {errorDetails?.searchResult && (
+                    <details style={{ marginTop: '0.5rem' }}>
+                        <summary style={{ cursor: 'pointer', color: '#721c24', fontWeight: 'bold' }}>
+                            SearchFacesByImage (Face Recognition API)
+                        </summary>
+                        <pre style={{
+                            background: '#fff',
+                            padding: '0.75rem',
+                            overflow: 'auto',
+                            maxHeight: '300px',
+                            marginTop: '0.5rem',
+                            border: '1px solid #f5c6cb',
+                            fontSize: '0.85rem'
+                        }}>
+                            {JSON.stringify(errorDetails.searchResult, null, 2)}
+                        </pre>
+                    </details>
+                )}
+
+                {/* Reference image from Face Liveness verification */}
+                {showReferenceImage && (
+                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #f5c6cb' }}>
+                        <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>
+                            Reference image from Face Liveness verification:
+                        </p>
+                        <img 
+                            src={`${errorDetails.referenceImageUrl}?t=${Date.now()}`} 
+                            alt="Reference image from verification"
+                            style={{ maxWidth: '300px', maxHeight: '300px', border: '1px solid #f5c6cb', borderRadius: '4px' }}
+                        />
                     </div>
                 )}
 

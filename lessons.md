@@ -1,41 +1,41 @@
-# Lessons Learned: Face Liveness Integration with AWS Amplify & Laravel
+# Lecciones Aprendidas: Integración de Face Liveness con AWS Amplify y Laravel
 
-## Overview
+## Visión General
 
-This document captures key lessons learned during the implementation of Amazon Rekognition Face Liveness in a Laravel application with React frontend.
+Este documento captura las lecciones clave aprendidas durante la implementación de Amazon Rekognition Face Liveness en una aplicación Laravel con frontend React.
 
-## AWS Face Liveness Session Management
+## Gestión de Sesiones de AWS Face Liveness
 
-### Issue: ClientRequestToken Format Restrictions
+### Problema: Restricciones de Formato en ClientRequestToken
 
-**Problem**: AWS `CreateFaceLivenessSession` has format restrictions on `ClientRequestToken`. Passing user IDs (e.g., "18") caused `InvalidParameterException`.
+**Problema**: AWS `CreateFaceLivenessSession` tiene restricciones de formato en `ClientRequestToken`. Pasar IDs de usuario (ej. "18") causaba `InvalidParameterException`.
 
-**Solution**: Don't pass user ID as `ClientRequestToken`. Let AWS generate session IDs automatically:
+**Solución**: No pasar ID de usuario como `ClientRequestToken`. Dejar que AWS genere los IDs de sesión automáticamente:
 ```php
-// WRONG:
+// INCORRECTO:
 $session = $rekognition->createFaceLivenessSession((string) $user->id);
 
-// CORRECT:
+// CORRECTO:
 $session = $rekognition->createFaceLivenessSession(null, [], false);
 ```
 
-### Issue: S3 OutputConfig Causes Component Errors
+### Problema: S3 OutputConfig Causa Errores en el Componente
 
-**Problem**: When using `OutputConfig` with S3 bucket, the AWS Amplify `FaceLivenessDetectorCore` component reported "Cannot read image.png" and session errors.
+**Problema**: Al usar `OutputConfig` con bucket S3, el componente `FaceLivenessDetectorCore` de AWS Amplify reportaba errores de sesión.
 
-**Solution**: Create sessions WITHOUT S3 output for frontend component compatibility:
+**Solución**: Crear sesiones SIN S3 para compatibilidad con el componente del frontend:
 ```php
-// Use S3 only for backend processing, not for frontend sessions
-$session = $rekognition->createFaceLivenessSession(null, [], false); // false = no S3
+// Usar S3 solo para procesamiento del backend, no para sesiones del frontend
+$session = $rekognition->createFaceLivenessSession(null, [], false); // false = sin S3
 ```
 
-## AWS Amplify FaceLivenessDetectorCore Component
+## Componente AWS Amplify FaceLivenessDetectorCore
 
-### Issue: Component Errors with Empty Credentials
+### Problema: Errores del Componente con Credenciales Vacías
 
-**Problem**: `FaceLivenessDetectorCore` called `credentialProvider` multiple times. If credentials weren't properly cached, it failed.
+**Problema**: `FaceLivenessDetectorCore` llamaba a `credentialProvider` múltiples veces. Si las credenciales no estaban en caché correctamente, fallaba.
 
-**Solution**: Ensure credentials are properly returned from the provider callback:
+**Solución**: Asegurarse de que las credenciales se devuelvan correctamente desde el callback:
 ```javascript
 const credentialProvider = useCallback(async () => {
     if (!credentials) {
@@ -49,27 +49,27 @@ const credentialProvider = useCallback(async () => {
 }, [credentials]);
 ```
 
-### Issue: Session Not Found After Creation
+### Problema: Sesión No Encontrada Después de Creación
 
-**Problem**: `FaceLivenessDetectorCore` reported "Session not found" immediately after session creation.
+**Problema**: `FaceLivenessDetectorCore` reportaba "Session not found" inmediatamente después de crear la sesión.
 
-**Solution**: 
-1. Ensure session is fully created before rendering component
-2. Don't reuse session IDs - each Face Liveness check needs a new session
-3. Sessions expire after 3 minutes
+**Solución**:
+1. Asegurarse de que la sesión esté completamente creada antes de renderizar el componente
+2. No reutilizar IDs de sesión - cada verificación Face Liveness necesita una sesión nueva
+3. Las sesiones expiran después de 3 minutos
 
-## S3 Integration with Face Liveness
+## Integración S3 con Face Liveness
 
-### Binary Data Handling
+### Manejo de Datos Binarios
 
-Face Liveness results can contain large binary data that cannot be JSON encoded. Implement cleanup:
+Los resultados de Face Liveness pueden contener datos binarios grandes que no pueden ser codificados en JSON. Implementar limpieza:
 
 ```php
 private function cleanLivenessResultForStorage(array $livenessResult): array
 {
     $cleaned = $livenessResult;
     
-    // Remove ReferenceImage Bytes
+    // Eliminar Bytes de ReferenceImage
     if (isset($cleaned['ReferenceImage']['Bytes'])) {
         $bytesLength = strlen($cleaned['ReferenceImage']['Bytes']);
         unset($cleaned['ReferenceImage']['Bytes']);
@@ -82,69 +82,69 @@ private function cleanLivenessResultForStorage(array $livenessResult): array
 
 ### S3Object vs Bytes
 
-When `AWS_S3_BUCKET` is configured:
-- Results contain `S3Object` instead of `Bytes`
-- When S3 bucket is NOT configured:
-- Results contain `Bytes` directly
+Cuando `AWS_S3_BUCKET` está configurado:
+- Los resultados contienen `S3Object` en lugar de `Bytes`
+- Cuando NO está configurado el bucket S3:
+- Los resultados contienen `Bytes` directamente
 
-Handle both cases:
+Manejar ambos casos:
 ```php
 private function getReferenceImageBytes(array $sessionResults): string
 {
-    // Check if bytes are directly available
+    // Verificar si los bytes están disponibles directamente
     if (isset($sessionResults['ReferenceImage']['Bytes'])) {
         return $sessionResults['ReferenceImage']['Bytes'];
     }
     
-    // Check if image is stored in S3
+    // Verificar si la imagen está almacenada en S3
     if (isset($sessionResults['ReferenceImage']['S3Object'])) {
         $s3Object = $sessionResults['ReferenceImage']['S3Object'];
         $bucket = $s3Object['Bucket'] ?? env('AWS_S3_BUCKET');
         $key = $s3Object['Name'] ?? null;
         
-        // Download from S3...
+        // Descargar desde S3...
     }
     
     throw new \Exception('No reference image found');
 }
 ```
 
-## CSRF Token Requirements
+## Requisitos de CSRF Token
 
-The React Face Liveness component requires CSRF token for API calls. Ensure meta tag is present:
+El componente React de Face Liveness requiere token CSRF para las llamadas API. Asegurarse de que la meta etiqueta esté presente:
 
 ```html
 <meta name="csrf-token" content="{{ csrf_token() }}">
 ```
 
-The component reads this token:
+El componente lee este token:
 ```javascript
 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
 ```
 
-## Vite & React Build Configuration
+## Configuración de Vite y React
 
-### Issue: React Not Loading After Build
+### Problema: React No Carga Después del Build
 
-**Problem**: JavaScript bundle not loading React after `npm run build`.
+**Problema**: El bundle de JavaScript no cargaba React después de `npm run build`.
 
-**Solution**: Ensure Vite assets are properly loaded in layout:
+**Solución**: Asegurarse de que los assets de Vite se carguen correctamente en el layout:
 ```php
-// In resources/views/layouts/app.blade.php
+// En resources/views/layouts/app.blade.php
 @vite(['resources/css/app.css', 'resources/js/app.js'])
 ```
 
-### Bundle Size
+### Tamaño del Bundle
 
-AWS Amplify UI React Liveness adds significant bundle size (~1.8MB). This is expected due to the complex Face Liveness component.
+AWS Amplify UI React Liveness añade un tamaño significativo al bundle (~1.8MB). Esto es esperado debido al complejo componente de Face Liveness.
 
-## Laravel Routes
+## Rutas de Laravel
 
-### Issue: GET Method Not Supported for Protected Routes
+### Problema: Método GET No Soportado para Rutas Protegidas
 
-**Problem**: `/special-operation` only accepted POST, causing 405 errors when redirected from frontend.
+**Problema**: `/special-operation` solo aceptaba POST, causando errores 405 cuando se redirigía desde el frontend.
 
-**Solution**: Add GET route for protected operations:
+**Solución**: Agregar ruta GET para operaciones protegidas:
 ```php
 Route::get('/special-operation', function () {
     $user = auth()->user();
@@ -155,53 +155,53 @@ Route::get('/special-operation', function () {
 })->middleware(['auth', 'require.stepup'])->name('special.operation.get');
 ```
 
-## Face Liveness Confidence Variability
+## Variabilidad de Confianza en Face Liveness
 
-### Normal Behavior
+### Comportamiento Normal
 
-Face Liveness confidence scores can vary significantly between attempts:
-- Good lighting + proper positioning: 90-99%
-- Moderate conditions: 70-90%
-- Poor conditions: below 60%
+Los puntajes de confianza de Face Liveness pueden variar significativamente entre intentos:
+- Buena iluminación + posicionamiento adecuado: 90-99%
+- Condiciones moderadas: 70-90%
+- Condiciones pobres: menos de 60%
 
-### Threshold Configuration
+### Configuración de Umbral
 
-Lower the threshold for testing to avoid false negatives:
+Bajar el umbral para pruebas para evitar falsos negativos:
 ```php
-// In RekognitionController and StepUpController
+// En RekognitionController y StepUpController
 if ($externalId == (string) $user->id && $faceConfidence >= 60.0 && $livenessConfidence >= 60.0) {
     $success = true;
 }
 ```
 
-## Testing Best Practices
+## Mejores Prácticas de Pruebas
 
-1. **Use fresh sessions**: Each Face Liveness attempt needs a new session
-2. **Hard refresh browser**: After code changes, use `Ctrl+Shift+R`
-3. **Check console logs**: Component outputs debugging info to browser console
-4. **Multiple attempts**: Face Liveness is designed to sometimes fail for security
+1. **Usar sesiones frescas**: Cada intento de Face Liveness necesita una sesión nueva
+2. **Forzar recarga del navegador**: Después de cambios de código, usar `Ctrl+Shift+R`
+3. **Revisar logs de consola**: El componente muestra información de depuración en la consola del navegador
+4. **Múltiples intentos**: Face Liveness está diseñado para fallar a veces por seguridad
 
-## File Structure Summary
+## Resumen de Estructura de Archivos
 
-Key files for Face Liveness:
-- `app/Services/RekognitionService.php` - AWS Rekognition wrapper
-- `app/Services/StsService.php` - STS for temporary credentials
-- `app/Http/Controllers/RekognitionController.php` - API endpoints
-- `resources/js/components/FaceLivenessDetector.jsx` - React component
-- `resources/js/app.js` - React initialization
-- `routes/web.php` - All routes including Face Liveness endpoints
+Archivos clave para Face Liveness:
+- `app/Services/RekognitionService.php` - Wrapper de AWS Rekognition
+- `app/Services/StsService.php` - STS para credenciales temporales
+- `app/Http/Controllers/RekognitionController.php` - Endpoints API
+- `resources/js/components/FaceLivenessDetector.jsx` - Componente React
+- `resources/js/app.js` - Inicialización de React
+- `routes/web.php` - Todas las rutas incluyendo endpoints de Face Liveness
 
-## Environment Variables Required
+## Variables de Entorno Requeridas
 
 ```dotenv
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_ACCESS_KEY_ID=tu_access_key
+AWS_SECRET_ACCESS_KEY=tu_secret_key
 AWS_DEFAULT_REGION=us-east-1
-AWS_S3_BUCKET=your_bucket_name  # Optional for Face Liveness
-STEPUP_TIMEOUT=900  # seconds
+AWS_S3_BUCKET=nombre_de_tu_bucket  # Opcional para Face Liveness
+STEPUP_TIMEOUT=900  # segundos
 ```
 
-## IAM Permissions Required
+## Permisos IAM Requeridos
 
 ```
 rekognition:CreateCollection
@@ -211,91 +211,86 @@ rekognition:CreateFaceLivenessSession
 rekognition:GetFaceLivenessSessionResults
 rekognition:StartFaceLivenessSession
 sts:GetSessionToken
-s3:GetObject  # If using S3 bucket
+s3:GetObject  # Si usas bucket S3
 ```
 
-## UI/UX Improvements (February 2026)
+## Mejoras de UI/UX (Febrero 2026)
 
-### Enhanced Error Handling
+### Manejo Mejorado de Errores
 
-The FaceLivenessDetector component was improved with:
+El componente FaceLivenessDetector fue mejorado con:
 
-1. **Detailed Error Messages**: Instead of generic alerts, users now see:
-   - Specific failure reasons (low liveness confidence, face not matched, etc.)
-   - Confidence score display (liveness %, face match %)
-   - Comparison against threshold requirements
+1. **Mensajes de Error Detallados**: En lugar de alertas genéricas, los usuarios ahora ven:
+   - Razones específicas de fallo (baja confianza de liveness, cara no coincidió, etc.)
+   - Visualización de puntaje de confianza (%, de coincidencia de cara)
+   - Comparación con requisitos de umbral
 
-2. **Actionable Hints**: Context-specific tips based on error type:
-   - Low liveness confidence: lighting, positioning, movement hints
-   - Face not matched: consistency with registration photo tips
-   - Face not found: framing and visibility guidance
+2. **Sugerencias Accionables**: Consejos específicos basados en el tipo de error:
+   - Baja confianza de liveness: iluminación, posicionamiento, sugerencias de movimiento
+   - Cara no coincidió: consistencia con consejos de foto de registro
+   - Cara no encontrada: guía de encuadre y visibilidad
 
-3. **Progress Indicator**: Visual feedback during verification analysis
-   - Animated spinner during processing
-   - "Analyzing..." status message
+3. **Indicador de Progreso**: Retroalimentación visual durante el análisis de verificación
+   - Animación de spinner durante procesamiento
+   - Mensaje de estado "Analizando..."
 
-4. **Smoother Retry Flow**: No more page reloads on failure
-   - "Try Again" button resets the component state
-   - Maintains page context and scroll position
-   - Users can immediately retry without losing their place
+4. **Flujo de Reintento Más Suave**: Sin más recargas de página en fallo
+   - Botón "Try Again" reinicia el estado del componente
+   - Mantiene el contexto de la página y posición de desplazamiento
+   - Los usuarios pueden reintentar inmediatamente sin perder su lugar
 
-### Error Types Handled
+### Tipos de Errores Manejados
 
 ```javascript
 const errorTypes = {
-    low_liveness_confidence: 'Liveness check did not meet security requirements',
-    face_not_matched: 'Face did not match registered image',
-    face_not_found: 'Face not detected in frame',
-    component: 'Face Liveness component error',
-    session_creation: 'Failed to create verification session',
-    network: 'Network error during verification'
+    low_liveness_confidence: 'La verificación de liveness no cumplió con requisitos de seguridad',
+    face_not_matched: 'La cara no coincidió con la imagen registrada',
+    face_not_found: 'Cara no detectada en el marco',
+    component: 'Error del componente Face Liveness',
+    session_creation: 'Error al crear sesión de verificación',
+    network: 'Error de red durante la verificación'
 };
 ```
 
-### Step-Up Page Improvements
+### Mejoras en la Página de Step-Up
 
-The step-up verification page now displays:
-- Formatted confidence scores with pass/fail indicators
-- Expandable raw Rekognition response (hidden by default)
-- Better visual hierarchy and color coding
-- Responsive design improvements
+La página de verificación step-up ahora muestra:
+- Puntajes de confianza formateados con indicadores de pasa/falla
+- Respuesta cruda de Rekognition expandable (oculta por defecto)
+- Mejor jerarquía visual y codificación por colores
+- Mejoras de diseño responsivo
 
-## References
+## Solución de Problemas Comunes
 
-- [AWS Rekognition Face Liveness Documentation](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness.html)
-- [AWS Amplify UI Face Liveness Component](https://ui.docs.amplify.aws/react/connected-components/liveness)
+### Error "Cannot read 'image.png'"
 
-## Troubleshooting Common Issues
+**Síntoma**: La consola muestra error: `Cannot read "image.png" (this model does not support image input)`
 
-### "Cannot read 'image.png'" Error
+**Causa**: Este es un problema conocido con el componente FaceLivenessDetectorCore de AWS Amplify. Ocurre cuando:
 
-**Symptom**: Console shows error: `Cannot read "image.png" (this model does not support image input)`
+1. La carga de assets internos del componente falla
+2. Incompatibilidad de versión entre `@aws-amplify/ui-react-liveness` y `aws-amplify`
+3. El componente intenta cargar assets de respaldo cuando la comunicación de sesión falla
 
-**Cause**: This is a known issue with the AWS Amplify FaceLivenessDetectorCore component. It occurs when:
+**Soluciones**:
 
-1. The component's internal asset loading fails
-2. Version incompatibility between `@aws-amplify/ui-react-liveness` and `aws-amplify`
-3. The component tries to load fallback assets when session communication fails
-
-**Solutions**:
-
-1. **Ensure CSS is imported**:
+1. **Asegurarse de que CSS esté importado**:
    ```javascript
-   // In app.js
+   // En app.js
    import '@aws-amplify/ui-react-liveness/styles.css';
    ```
 
-2. **Add proper error handling for this specific error**:
+2. **Agregar manejo específico de errores para este error**:
    ```javascript
    const handleError = (err) => {
        if (err.message?.includes('image.png') || err.message?.includes('Cannot read')) {
-           // Handle specifically - suggest refresh
-           setError('Session error. Please refresh and try again.');
+           // Manejar específicamente - sugerir recarga
+           setError('Error de sesión. Por favor recarga e intenta de nuevo.');
        }
    };
    ```
 
-3. **Use manual retry mode**:
+3. **Usar modo de reintento manual**:
    ```javascript
    <FaceLivenessDetectorCore
        config={{
@@ -307,7 +302,7 @@ The step-up verification page now displays:
    />
    ```
 
-4. **Check package versions**: Ensure compatible versions:
+4. **Verificar versiones de paquetes**: Asegurar versiones compatibles:
    ```json
    {
        "@aws-amplify/ui-react-liveness": "^3.0.0",
@@ -315,41 +310,41 @@ The step-up verification page now displays:
    }
    ```
 
-### Understanding "success: false"
+### Entendiendo "success: false"
 
-**Question**: When I see `success: false` in DevTools, should I assume the liveness check failed?
+**Pregunta**: Cuando veo `success: false` en DevTools, ¿debo asumir que la verificación de liveness falló?
 
-**Answer**: **Yes**, `success: false` means the Face Liveness verification failed. This can happen due to:
+**Respuesta**: **Sí**, `success: false` significa que la verificación de Face Liveness falló. Esto puede pasar debido a:
 
-1. **Low liveness confidence** (< 60%): The system couldn't verify the face is real (not a photo/video)
-2. **Face not matched**: The face doesn't match the registered image
-3. **Face not found**: No face detected in the frame
-4. **Session error**: Component or network issue
+1. **Baja confianza de liveness** (< 60%): El sistema no pudo verificar que la cara es real (no es foto/video)
+2. **Cara no coincidió**: La cara no coincide con la imagen registrada
+3. **Cara no encontrada**: No se detectó cara en el marco
+4. **Error de sesión**: Error del componente o de red
 
-The component outputs the result to the console, but you should also check the UI for:
-- Detailed error messages
-- Confidence scores (liveness % and face match %)
-- Actionable hints for improvement
+El componente muestra el resultado en la consola, pero también debes revisar la UI para:
+- Mensajes de error detallados
+- Puntajes de confianza (% de liveness y % de coincidencia de cara)
+- Sugerencias accionables para mejora
 
-### Black Figure Rendering Issue
+### Problema de Renderización de Figura Negra
 
-**Question**: Why is there a black figure shown below "Check complete"? Shouldn't the oval area be on top of that black figure?
+**Pregunta**: ¿Por qué hay una figura negra mostrada debajo de "Check complete"? ¿No debería el área ovalada estar sobre esa figura negra?
 
-**Cause**: This is a rendering issue with the FaceLivenessDetectorCore component where the face detection overlay doesn't render correctly in certain conditions.
+**Causa**: Este es un problema de renderización con el componente FaceLivenessDetectorCore donde la superposición de detección de cara no se renderiza correctamente en ciertas condiciones.
 
-**Solutions**:
+**Soluciones**:
 
-1. **Ensure component is properly mounted**:
+1. **Asegurarse de que el componente esté montado correctamente**:
    ```javascript
    const [componentReady, setComponentReady] = useState(false);
 
-   // Only render component after session is ready
+   // Solo renderizar componente después de que la sesión esté lista
    {componentReady && (
        <FaceLivenessDetectorCore ... />
    )}
    ```
 
-2. **Add CSS z-index fix** (if needed):
+2. **Agregar fix de CSS z-index** (si es necesario):
    ```css
    .amplify-face-liveness-detector {
        z-index: 1000 !important;
@@ -357,38 +352,38 @@ The component outputs the result to the console, but you should also check the U
    }
    ```
 
-3. **Try a different browser**: Some browsers may have rendering issues with the component.
+3. **Intentar un navegador diferente**: Algunos navegadores pueden tener problemas de renderización con el componente.
 
-4. **Refresh the page**: The component may not have initialized correctly.
+4. **Recargar la página**: El componente puede no haberse inicializado correctamente.
 
-**Note**: This appears to be a known rendering quirk in the AWS Amplify component. The underlying verification still works correctly - it's a visual display issue only.
+**Nota**: Esto parece ser un problema conocido de renderización en el componente de AWS Amplify. La verificación subyacente aún funciona correctamente - es solo un problema de visualización.
 
-## Common Face Liveness Confidence Scores
+## Puntuaciones Comunes de Confianza de Face Liveness
 
-| Score Range | Interpretation | Recommendation |
-|-------------|----------------|----------------|
-| 90-99% | Excellent | Verification should pass |
-| 70-89% | Good | Likely to pass, but ensure good conditions |
-| 60-69% | Borderline | May fail - improve lighting and positioning |
-| < 60% | Poor | Will fail - see tips below |
+| Rango de Puntuación | Interpretación | Recomendación |
+|---------------------|----------------|---------------|
+| 90-99% | Excelente | La verificación debería pasar |
+| 70-89% | Bueno | Probablemente pase, pero asegurar buenas condiciones |
+| 60-69% | En el límite | Puede fallar - mejorar iluminación y posicionamiento |
+| < 60% | Pobre | Fallará - ver consejos abajo |
 
-### Tips for Higher Confidence Scores
+### Consejos para Obtener Puntuaciones de Confianza Más Altas
 
-1. **Lighting**: Use even, diffuse lighting. Avoid backlighting (light behind you).
-2. **Positioning**: Keep your face centered and at a consistent distance.
-3. **Movement**: Follow the on-screen instructions for head movement.
-4. **Consistency**: Look similar to your registration photo (glasses, expression, etc.).
-5. **Background**: Use a plain, neutral background.
+1. **Iluminación**: Usar iluminación uniforme y difusa. Evitar contraluz (luz detrás de ti).
+2. **Posicionamiento**: Mantener la cara centrada y a una distancia consistente.
+3. **Movimiento**: Seguir las instrucciones en pantalla para movimiento de cabeza.
+4. **Consistencia**: Parecerse a tu foto de registro (gafas, expresión, etc.).
+5. **Fondo**: Usar un fondo liso y neutro.
 
-## Laravel Form Validation with Conditional Fields
+## Validación de Formulario Laravel con Campos Condicionales
 
-### Issue: Middleware ConvertEmptyStringsToNull Breaking Conditional Validation
+### Problema: Middleware ConvertEmptyStringsToNull Rompe Validación Condicional
 
-**Problem**: When using Laravel's `exclude_if` validation rule, empty hidden fields were being converted to `null` by the `ConvertEmptyStringsToNull` middleware, causing validation to fail with "The field must be a string" error.
+**Problema**: Al usar la regla de validación `exclude_if` de Laravel, los campos ocultos vacíos estaban siendo convertidos a `null` por el middleware `ConvertEmptyStringsToNull`, causando que la validación fallara con error "The field must be a string".
 
-**Symptom**: Error message: "The liveness session id field must be a string."
+**Síntoma**: Mensaje de error: "The liveness session id field must be a string."
 
-**Solution**: Use `exclude_if:registration_method,image` to completely skip validation when the condition is met:
+**Solución**: Usar `exclude_if:registration_method,image` para saltarse completamente la validación cuando se cumple la condición:
 ```php
 $validated = $request->validate([
     'name' => 'required|string|max:255',
@@ -401,168 +396,168 @@ $validated = $request->validate([
 ]);
 ```
 
-**Key Insight**: `exclude_if` and `exclude_unless` completely skip validation rules when the condition is met, preventing the middleware from converting empty strings to null for those fields.
+**Perspectiva Clave**: `exclude_if` y `exclude_unless` saltan completamente las reglas de validación cuando se cumple la condición, evitando que el middleware convierta strings vacíos a null para esos campos.
 
-## Code Placement in Conditional Logic
+## Colocación de Código en Lógica Condicional
 
-### Issue: Code Block Inside Wrong Conditional
+### Problema: Bloque de Código Dentro del Condicional Incorrecto
 
-**Problem**: A code block for handling "no face match found" was placed **inside** an `if (count($matches) > 0)` block, causing it to never execute when no face matches were found.
+**Problema**: Un bloque de código para manejar "no se encontró coincidencia de cara" estaba colocado **dentro** de un bloque `if (count($matches) > 0)`, causando que nunca se ejecutara cuando no se encontraron coincidencias de cara.
 
-**Symptom**: Users with invalid faces saw a blank page instead of an error message.
+**Síntoma**: Usuarios con caras inválidas veían una página en blanco en lugar de un mensaje de error.
 
-**Solution**: Move the error handling code **outside** the conditional block:
+**Solución**: Mover el código de manejo de errores **fuera** del bloque condicional:
 ```php
-// WRONG - code inside the if, never runs when count is 0
+// INCORRECTO - código dentro del if, nunca se ejecuta cuando count es 0
 if (count($matches) > 0) {
-    // ... match handling ...
+    // ... manejo de coincidencias ...
     
-    // No face match found - THIS CODE NEVER RUNS!
+    // No se encontró coincidencia de cara - ¡ESTE CÓDIGO NUNCA SE EJECUTA!
     return redirect()->route('stepup.show')->withErrors([...]);
 }
 
-// CORRECT - code outside the if
+// CORRECTO - código fuera del if
 if (count($matches) > 0) {
-    // ... match handling ...
+    // ... manejo de coincidencias ...
 }
 
-// No face match found - THIS CODE RUNS when count is 0
+// No se encontró coincidencia de cara - ESTE CÓDIGO SE EJECUTA cuando count es 0
 return redirect()->route('stepup.show')->withErrors([...]);
 ```
 
-**Key Insight**: Always verify that error handling code is placed at the correct scope level. Code inside a conditional only runs when that condition is true.
+**Perspectiva Clave**: Siempre verificar que el código de manejo de errores esté placed en el nivel de scope correcto. El código dentro de un condicional solo se ejecuta cuando esa condición es verdadera.
 
-## Redirect Flow Differences: Valid vs Invalid Faces
+## Diferencias de Flujo de Redirección: Caras Válidas vs Inválidas
 
-### Behavior Difference
+### Diferencia de Comportamiento
 
-**Observation**: Verification with valid faces appears slower than with invalid faces.
+**Observación**: La verificación con caras válidas parece más lenta que con caras inválidas.
 
-**Explanation**: The flows are fundamentally different:
+**Explicación**: Los flujos son fundamentalmente diferentes:
 
-- **Invalid faces**: Direct redirect to `/step-up` with error session data (1 request)
-- **Valid faces**: Redirect through `stepup_post_redirect` with hidden form + JavaScript (2+ requests)
+- **Caras inválidas**: Redirección directa a `/step-up` con datos de sesión de error (1 solicitud)
+- **Caras válidas**: Redirección a través de `stepup_post_redirect` con formulario oculto + JavaScript (2+ solicitudes)
 
-**Valid Face Flow**:
+**Flujo de Cara Válida**:
 ```
-1. POST /step-up/verify → Verification successful
-2. Return view('stepup_post_redirect') with hidden form
-3. Browser loads page, JavaScript auto-submits form
-4. POST /special-operation → Success page
-```
-
-**Invalid Face Flow**:
-```
-1. POST /step-up/verify → Verification failed
-2. Redirect to /step-up (GET) with error data
-3. Page loads with error message
+1. POST /step-up/verify → Verificación exitosa
+2. Retornar view('stepup_post_redirect') con formulario oculto
+3. Navegador carga página, JavaScript hace auto-submit del formulario
+4. POST /special-operation → Página de éxito
 ```
 
-**Key Insight**: The extra step for valid faces is necessary to maintain POST data for protected operations. The performance difference is expected behavior, not a bug.
+**Flujo de Cara Inválida**:
+```
+1. POST /step-up/verify → Verificación falló
+2. Redirección a /step-up (GET) con datos de error
+3. Página carga con mensaje de error
+```
 
-## Session Data Passing Across Redirects
+**Perspectiva Clave**: El paso extra para caras válidas es necesario para mantener datos POST para operaciones protegidas. La diferencia de rendimiento es comportamiento esperado, no un error.
 
-### Issue: Verification Data Lost in POST Flow
+## Paso de Datos de Sesión a Través de Redirecciones
 
-**Problem**: Verification data was generated after the redirect to `stepup_post_redirect`, causing it to be unavailable when the form was submitted to `/special-operation`.
+### Problema: Datos de Verificación Perdidos en Flujo POST
 
-**Solution**: Generate and store verification data BEFORE any redirect:
+**Problema**: Los datos de verificación se generaban después de la redirección a `stepup_post_redirect`, causando que no estuvieran disponibles cuando el formulario se enviaba a `/special-operation`.
+
+**Solución**: Generar y almacenar datos de verificación ANTES de cualquier redirección:
 ```php
-// Generate verification data FIRST
+// Generar datos de verificación PRIMERO
 $verificationData = [
     'method' => 'image',
     'confidence' => $confidence,
-    // ... other fields
+    // ... otros campos
 ];
 
-// Store in session for both GET and POST flows
+// Almacenar en sesión para ambos flujos GET y POST
 $request->session()->put('stepup_verification_result', $verificationData);
 
-// Now safe to redirect
+// Ahora es seguro redirigir
 return view('stepup_post_redirect', compact('targetUrl', 'inputs', 'verificationData'));
 ```
 
-**Key Insight**: When using intermediate redirect pages (like `stepup_post_redirect`), verification data must be stored in session BEFORE returning the view, not after.
+**Perspectiva Clave**: Al usar páginas de redirección intermedias (como `stepup_post_redirect`), los datos de verificación deben almacenarse en sesión ANTES de retornar la vista, no después.
 
-## Form Submission Methods: Normal vs AJAX
+## Métodos de Envío de Formulario: Normal vs AJAX
 
-### Issue: Form Being Submitted via fetch Instead of Normal Submit
+### Problema: Formulario Enviado vía fetch en Lugar de Envío Normal
 
-**Problem**: The verification form was being submitted using `fetch` (AJAX) instead of normal browser form submission, causing redirects to not work properly.
+**Problema**: El formulario de verificación estaba siendo enviado usando `fetch` (AJAX) en lugar del envío normal del navegador, causando que las redirecciones no funcionaran correctamente.
 
-**Symptom**: User was redirected to `/step-up/verify` (the POST endpoint) with a blank page instead of being redirected to `/step-up` with errors.
+**Síntoma**: El usuario era redirigido a `/step-up/verify` (el endpoint POST) con una página en blanco en lugar de ser redirigido a `/step-up` con errores.
 
-**Investigation**: Check browser DevTools Network tab for the actual request method being used.
+**Investigación**: Revisar la pestaña Network de DevTools para el método de solicitud real siendo usado.
 
-**Solution**: Use explicit redirects instead of `back()`:
+**Solución**: Usar redirecciones explícitas en lugar de `back()`:
 ```php
-// Use explicit route redirect instead of back()
-return redirect()->route('stepup.show')->withErrors(['face' => 'Verification failed']);
+// Usar redirección de ruta explícita en lugar de back()
+return redirect()->route('stepup.show')->withErrors(['face' => 'Verificación fallida']);
 ```
 
-**Key Insight**: `back()->withErrors()` relies on HTTP_REFERER which may not always be reliable. Using explicit `redirect()->route()` is more robust.
+**Perspectiva Clave**: `back()->withErrors()` depende de HTTP_REFERER que puede no ser siempre confiable. Usar `redirect()->route()` explícito es más robusto.
 
-## Debugging Techniques for Laravel Controllers
+## Técnicas de Depuración para Controladores Laravel
 
-### Adding Strategic Logs
+### Agregar Logs Estratégicos
 
-When debugging complex controller logic, add logs at key points:
+Al depurar lógica compleja del controlador, agregar logs en puntos clave:
 ```php
 public function verify(Request $request, RekognitionService $rekognition)
 {
-    logger('verify - called');
-    logger('verify - registrationMethod: ' . $registrationMethod);
-    logger('verify - entering image verification block');
-    logger('verify - validation passed');
-    logger('verify - searchFace completed', ['FaceMatches' => count($result['FaceMatches'] ?? [])]);
-    logger('verify - matches count: ' . count($matches));
-    logger('verify - no face match found, redirecting...');
+    logger('verify - llamado');
+    logger('verify - métodoRegistro: ' . $metodoRegistro);
+    logger('verify - entrando en bloque de verificación de imagen');
+    logger('verify - validación pasada');
+    logger('verify - searchFace completado', ['FaceMatches' => count($result['FaceMatches'] ?? [])]);
+    logger('verify - coincidencias count: ' . count($coincidencias));
+    logger('verify - no se encontró coincidencia de cara, redirigiendo...');
 }
 ```
 
-**Key Insight**: Progressive logging helps identify exactly where code execution stops or takes a different path than expected.
+**Perspectiva Clave**: El logging progresivo ayuda a identificar exactamente dónde la ejecución del código se detiene o toma un camino diferente al esperado.
 
-## Enhanced Error UI for Step-Up Verification
+## UI de Errores Mejorada para Verificación Step-Up
 
-### Problem: Generic Error Messages
+### Problema: Mensajes de Error Genéricos
 
-**Problem**: Users saw only generic error messages like "Verification failed" without actionable feedback.
+**Problema**: Los usuarios veían solo mensajes de error genéricos como "Verificación fallida" sin retroalimentación accionable.
 
-**Solution**: Enhanced error UI with technical details and visual indicators:
+**Solución**: UI de errores mejorada con detalles técnicos e indicadores visuales:
 ```php
-// In Blade template - Error area with detailed feedback
+// En plantilla Blade - Área de error con retroalimentación detallada
 @if($errors->any() || session('stepup_error_details'))
     <div style="color:#721c24; background-color:#f8d7da; border:1px solid #f5c6cb;">
-        <h3 style="margin-top:0;">Face Verification Failed</h3>
-        <p><strong>Reason:</strong> {{ $errorMessage }}</p>
+        <h3 style="margin-top:0;">Verificación de Cara Fallida</h3>
+        <p><strong>Razón:</strong> {{ $errorMessage }}</p>
 
-        {{-- Technical details with color-coded confidence scores --}}
+        {{-- Detalles técnicos con puntajes de confianza codificados por color --}}
         @if($livenessConf)
             <p>
-                <strong>Liveness Confidence:</strong>
+                <strong>Confianza de Liveness:</strong>
                 <span style="color: {{ $livenessConf >= 60 ? '#28a745' : '#dc3545' }};">
                     {{ number_format($livenessConf, 1) }}%
-                    {{ $livenessConf >= 60 ? '(passed)' : '(below 60% threshold)' }}
+                    {{ $livenessConf >= 60 ? '(aprobado)' : '(debajo del umbral de 60%)' }}
                 </span>
             </p>
         @endif
 
-        {{-- Accordion with raw API response --}}
+        {{-- Acordeón con respuesta cruda de API --}}
         <details>
-            <summary>Show raw Rekognition API response</summary>
+            <summary>Mostrar respuesta cruda de Rekognition API</summary>
             <pre>{{ json_encode($errorDetails, JSON_PRETTY_PRINT) }}</pre>
         </details>
     </div>
 @endif
 ```
 
-**Key Insight**: Users need actionable feedback with confidence scores to understand why verification failed and how to improve.
+**Perspectiva Clave**: Los usuarios necesitan retroalimentación accionable con puntajes de confianza para entender por qué la verificación falló y cómo mejorar.
 
-### Displaying Failed Verification Image
+### Mostrar Imagen de Verificación Fallida
 
-**Problem**: Users couldn't see what image they submitted during a failed verification attempt.
+**Problema**: Los usuarios no podían ver qué imagen habían enviado durante un intento de verificación fallido.
 
-**Solution**: Add endpoint to serve error images from session storage:
+**Solución**: Agregar endpoint para servir imágenes de error desde almacenamiento de sesión:
 ```php
 // StepUpController.php
 public function errorImage(Request $request): StreamedResponse
@@ -581,79 +576,79 @@ public function errorImage(Request $request): StreamedResponse
 }
 ```
 
-**Key Insight**: Showing users their submitted image helps them understand why verification failed (e.g., blurry photo, poor lighting).
+**Perspectiva Clave**: Mostrar a los usuarios su imagen enviada les ayuda a entender por qué la verificación falló (ej. foto borrosa, mala iluminación).
 
-## Enhanced Success UI for Step-Up Verification
+## UI de Éxito Mejorada para Verificación Step-Up
 
-### Problem: Inconsistent Success Messages
+### Problema: Mensajes de Éxito Inconsistentes
 
-**Problem**: Success page showed different information for liveness vs image users, making it hard to understand what happened.
+**Problema**: La página de éxito mostraba información diferente para usuarios de liveness vs imagen, dificultando entender qué pasó.
 
-**Solution**: Unified success UI with method-specific details:
+**Solución**: UI de éxito unificada con detalles específicos del método:
 ```php
-// In Blade template
+// En plantilla Blade
 <div style="color:#155724; background-color:#d4edda; border:1px solid #c3e6cb;">
-    <h3 style="margin-top:0;">✅ Verification Successful</h3>
+    <h3 style="margin-top:0;">✅ Verificación Exitosa</h3>
     <p>
-        <strong>Your identity has been verified successfully</strong>
+        <strong>Tu identidad ha sido verificada exitosamente</strong>
         @if($method === 'liveness')
-            via Face Liveness
+            vía Face Liveness
         @else
-            via Image-based verification
+            vía verificación basada en imagen
         @endif
     </p>
 
-    {{-- Technical details --}}
+    {{-- Detalles técnicos --}}
     @if($livenessConfidence !== null)
-        <p><strong>Liveness Confidence:</strong> {{ number_format($livenessConfidence, 1) }}%</p>
+        <p><strong>Confianza de Liveness:</strong> {{ number_format($livenessConfidence, 1) }}%</p>
     @endif
     @if($confidence)
-        <p><strong>Face Match Confidence:</strong> {{ number_format($confidence, 1) }}%</p>
+        <p><strong>Confianza de Coincidencia de Cara:</strong> {{ number_format($confidence, 1) }}%</p>
     @endif
 </div>
 ```
 
-**Key Insight**: Consistent UI with clear success indicators improves user confidence in the verification system.
+**Perspectiva Clave**: UI consistente con indicadores de éxito claros mejora la confianza del usuario en el sistema de verificación.
 
-## Session Data Passing in POST Redirect Flows
+## Paso de Datos de Sesión en Flujos de Redirección POST
 
-### Problem: Verification Data Lost in stepup_post_redirect
+### Problema: Datos de Verificación Perdidos en stepup_post_redirect
 
-**Problem**: When using `stepup_post_redirect` to maintain POST data, verification data was generated after the redirect, causing it to be unavailable.
+**Problema**: Al usar `stepup_post_redirect` para mantener datos POST, los datos de verificación se generaban después de la redirección, causando que no estuvieran disponibles.
 
-**Solution**: Store verification data in session BEFORE returning the redirect view:
+**Solución**: Almacenar datos de verificación en sesión ANTES de retornar la vista de redirección:
 ```php
-// WRONG - data stored after redirect
+// INCORRECTO - datos almacenados después de redirección
 return view('stepup_post_redirect', ...);
-$request->session()->put('stepup_verification_result', $data); // Too late!
+$request->session()->put('stepup_verification_result', $data); // ¡Demasiado tarde!
 
-// CORRECT - data stored before redirect
+// CORRECTO - datos almacenados antes de redirección
 $request->session()->put('stepup_verification_result', $verificationData);
 return view('stepup_post_redirect', ...);
 ```
 
-Also pass verification data as hidden input:
+También pasar datos de verificación como input oculto:
 ```php
-{{-- In stepup_post_redirect.blade.php --}}
+{{-- En stepup_post_redirect.blade.php --}}
 @if(isset($verificationData))
     <input type="hidden" name="verification_data" value='{{ json_encode($verificationData) }}'>
 @endif
 ```
 
-**Key Insight**: When using intermediate redirect pages, all data must be available BEFORE the redirect since the next page load is a new request.
+**Perspectiva Clave**: Al usar páginas de redirección intermedias, todos los datos deben estar disponibles ANTES de la redirección ya que la siguiente carga de página es una solicitud nueva.
 
-## Multiple Session Keys for Verification Data
+## Múltiples Claves de Sesión para Datos de Verificación
 
-### Problem: Verification Data Not Available in All Flows
+### Problema: Datos de Verificación No Disponibles en Todos los Flujos
 
-**Problem**: Different flows (GET vs POST, liveness vs image) used different session keys, causing data to be unavailable in some cases.
+**Problema**: Diferentes flujos (GET vs POST, liveness vs imagen) usaban diferentes claves de sesión, causando que los datos no estuvieran disponibles en algunos casos.
 
-**Solution**: Use fallback logic and consistent session keys:
+**Solución**: Usar lógica de respaldo y claves de sesión consistentes:
 ```php
-// Check flash data first, then session data
+// Verificar datos flash primero, luego datos de sesión
 $verification = session('verification') ?? session('stepup_verification_result');
 
-// Log to debug
+// Log para depurar
 logger('special-operation POST', [
     'user_id' => $user->id,
     'verification_data' => $verification,
@@ -662,15 +657,15 @@ logger('special-operation POST', [
 ]);
 ```
 
-**Key Insight**: When supporting multiple flows (GET/POST, AJAX/normal submit), use consistent session keys and fallback logic.
+**Perspectiva Clave**: Al soportar múltiples flujos (GET/POST, AJAX/normal), usar claves de sesión consistentes y lógica de respaldo.
 
-## Layout Method Label Display
+## Visualización de Etiqueta de Método de Registro en Layout
 
-### Problem: Users Couldn't Tell Which Registration Method They Used
+### Problema: Usuarios No Podían Indicar Qué Método de Registro Usaron
 
-**Problem": After Face Liveness integration, users registered with different methods but the UI didn't indicate which method they used.
+**Problema**: Después de la integración de Face Liveness, los usuarios registrados con diferentes métodos pero la UI no indicaba qué método habían usado.
 
-**Solution**: Add method label next to face thumbnail:
+**Solución**: Agregar etiqueta de método junto a la miniatura de cara:
 ```php
 @if($hasFaceImage)
     @php
@@ -683,17 +678,78 @@ logger('special-operation POST', [
 @endif
 ```
 
-**Key Insight**: Clear method indicators help users understand their authentication status and expected verification flow.
+**Perspectiva Clave**: Indicadores de método claros ayudan a los usuarios a entender su estado de autenticación y flujo de verificación esperado.
 
-## Test Images Cleanup
+## Limpieza de Imágenes de Prueba
 
-### Issue: Accumulated Test Images
+### Problema: Imágenes de Prueba Acumuladas
 
-**Problem**: Test images (j1.jpg, j2.jpg, j3.jpg) were accidentally committed to the repository.
+**Problema**: Imágenes de prueba (j1.jpg, j2.jpg, j3.jpg) fueron accidentalmente commitidas al repositorio.
 
-**Solution**: Delete test images and add to .gitignore if needed:
+**Solución**: Eliminar imágenes de prueba y agregar a .gitignore si es necesario:
 ```bash
 git rm public/caras/j1.jpg public/caras/j2.jpg public/caras/j3.jpg
 ```
 
-**Key Insight**: Keep test files out of the repository or use a dedicated test data directory.
+**Perspectiva Clave**: Mantener archivos de prueba fuera del repositorio o usar un directorio dedicado para datos de prueba.
+
+## Código Duplicado Después del Loop
+
+### Problema: Error "Undefined variable $userFace" Después de Verificación Exitosa
+
+**Problema**: La verificación de Face Liveness mostraba "Verification SUCCESS" en logs pero luego fallaba con error "Undefined variable $userFace".
+
+**Causa Raíz**: Código duplicado existía tanto dentro del loop foreach (para caso de éxito) COMO después del loop. El caso de éxito del loop ya almacenaba todos los datos de verificación y retornaba JSON, pero el código después del loop intentaba hacer lo mismo usando una variable `$userFace` no definida.
+
+**Síntoma**:
+```
+[2026-02-05 15:55:43] local.DEBUG: Verification SUCCESS for current user {...}
+[2026-02-05 15:55:43] local.DEBUG: Face Liveness verification ERROR {"error":"Undefined variable $userFace"...}
+```
+
+**Solución**: Eliminar el bloque de código duplicado después del loop ya que el manejo de éxito ya está hecho dentro del foreach:
+```php
+// ELIMINADO (líneas 395-426):
+// if ($userFace) {
+//     $userFace->verification_status = 'verified';
+//     ...
+// }
+//
+// El caso de éxito dentro del foreach ya maneja:
+// - Almacenar stepup_verified_at
+// - Almacenar stepup_liveness_verification_image
+// - Almacenar stepup_verification_result
+// - Retornar JSON con 'verified' => true
+```
+
+**Perspectiva Clave**: La duplicación de código puede causar errores sutiles. Al agregar manejo de éxito dentro de un loop, verificar que no haya código duplicado después del loop que podría ejecutarse incorrectamente.
+
+## Prioridad de Imagen de Sesión en Flujos de Múltiples Intentos
+
+### Problema: Imagen de Referencia Incorrecta Mostrada en Verificación Fallida
+
+**Problema**: Al hacer múltiples intentos fallidos de verificación de Face Liveness, la "Imagen de referencia de verificación de Face Liveness" mostrada en la UI de error era de un intento anterior, no del actual.
+
+**Causa Raíz**: El endpoint `livenessVerificationImage` usaba fusión de null (`??`) que podía retornar una imagen de sesión antigua:
+```php
+// INCORRECTO - '??' retorna el primer valor no null, incluso si es de sesión antigua
+$s3Object = $request->session()->get('stepup_liveness_verification_image')
+    ?? $request->session()->get('stepup_error_reference_image');
+```
+
+**Solución**: Priorizar imagen de referencia de error y solo usar imagen de éxito como respaldo si no existe imagen de error:
+```php
+// CORRECTO - siempre usar la imagen de error más reciente
+$s3Object = $request->session()->get('stepup_error_reference_image');
+
+if (!$s3Object) {
+    $s3Object = $request->session()->get('stepup_liveness_verification_image');
+}
+```
+
+**Perspectiva Clave**: En flujos de múltiples intentos, siempre priorizar los datos del intento más reciente. El operador de fusión de null puede retornar silenciosamente datos obsoletos de intentos anteriores.
+
+## Referencias
+
+- [Documentación de AWS Rekognition Face Liveness](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness.html)
+- [Componente Face Liveness de AWS Amplify UI](https://ui.docs.amplify.aws/react/connected-components/liveness)

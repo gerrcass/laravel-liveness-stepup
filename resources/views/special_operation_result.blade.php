@@ -63,11 +63,20 @@
                 @endif
             </div>
 
-            {{-- Accordion with raw API response --}}
-            <details style="margin-top:1rem;">
-                <summary style="cursor:pointer; color:#155724; font-weight:bold;">Show raw Rekognition API response</summary>
-                <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #c3e6cb; font-size:0.85rem;">{{ json_encode($verification['rekognition_response'] ?? $verification, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
-            </details>
+            {{-- Raw API responses from each AWS Rekognition call --}}
+            @if($method === 'liveness' && isset($verification['liveness_result']))
+                <details style="margin-top:1rem;">
+                    <summary style="cursor:pointer; color:#155724; font-weight:bold;">GetFaceLivenessSessionResults (Face Liveness API)</summary>
+                    <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #c3e6cb; font-size:0.85rem;">{{ json_encode($verification['liveness_result'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                </details>
+            @endif
+
+            @if(isset($verification['rekognition_response']))
+                <details style="margin-top:0.5rem;">
+                    <summary style="cursor:pointer; color:#155724; font-weight:bold;">SearchFacesByImage (Face Recognition API)</summary>
+                    <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #c3e6cb; font-size:0.85rem;">{{ json_encode($verification['rekognition_response'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                </details>
+            @endif
 
             {{-- Image used in verification --}}
             @if(session('stepup_verification_image_path'))

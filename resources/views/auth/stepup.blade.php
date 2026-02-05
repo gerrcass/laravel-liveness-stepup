@@ -25,10 +25,19 @@
             {{-- Error details if available --}}
             @if($errorDetails)
                 @php
-                    $livenessConf = $errorDetails['LivenessConfidence'] ?? null;
-                    $faceConf = $errorDetails['FaceMatches'][0]['Similarity'] ?? null;
-                    $faceId = $errorDetails['FaceMatches'][0]['Face']['FaceId'] ?? null;
-                    $externalId = $errorDetails['FaceMatches'][0]['Face']['ExternalImageId'] ?? null;
+                    // New format with separated responses
+                    $livenessResult = $errorDetails['liveness_result'] ?? null;
+                    $searchResult = $errorDetails['search_result'] ?? null;
+                    
+                    // Extract confidence values - support both old and new format
+                    $livenessConf = $errorDetails['LivenessConfidence'] 
+                        ?? ($livenessResult['Confidence'] ?? null);
+                    
+                    $faceMatches = $searchResult['FaceMatches'] 
+                        ?? ($errorDetails['FaceMatches'] ?? []);
+                    $faceConf = $faceMatches[0]['Similarity'] ?? null;
+                    $faceId = $faceMatches[0]['Face']['FaceId'] ?? null;
+                    $externalId = $faceMatches[0]['Face']['ExternalImageId'] ?? null;
                     $userId = Auth::id();
                 @endphp
 
@@ -73,18 +82,43 @@
                     </div>
                 @endif
 
-                {{-- Accordion with raw API response --}}
-                <details style="margin-top:1rem;">
-                    <summary style="cursor:pointer; color:#721c24; font-weight:bold;">Show raw Rekognition API response</summary>
-                    <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #f5c6cb; font-size:0.85rem;">{{ json_encode($errorDetails, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
-                </details>
+                {{-- Raw API responses from each AWS Rekognition call --}}
+                @if(isset($errorDetails['liveness_result']) || isset($errorDetails['search_result']))
+                    @if(isset($errorDetails['liveness_result']))
+                        <details style="margin-top:1rem;">
+                            <summary style="cursor:pointer; color:#721c24; font-weight:bold;">GetFaceLivenessSessionResults (Face Liveness API)</summary>
+                            <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #f5c6cb; font-size:0.85rem;">{{ json_encode($errorDetails['liveness_result'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                        </details>
+                    @endif
+
+                    @if(isset($errorDetails['search_result']))
+                        <details style="margin-top:0.5rem;">
+                            <summary style="cursor:pointer; color:#721c24; font-weight:bold;">SearchFacesByImage (Face Recognition API)</summary>
+                            <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #f5c6cb; font-size:0.85rem;">{{ json_encode($errorDetails['search_result'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                        </details>
+                    @endif
+                @else
+                    {{-- Legacy format: single raw API response --}}
+                    <details style="margin-top:1rem;">
+                        <summary style="cursor:pointer; color:#721c24; font-weight:bold;">SearchFacesByImage (Face Recognition API)</summary>
+                        <pre style="background:#fff; padding:0.75rem; overflow:auto; max-height:300px; margin-top:0.5rem; border:1px solid #f5c6cb; font-size:0.85rem;">{{ json_encode($errorDetails, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) }}</pre>
+                    </details>
+                @endif
             @endif
 
-            {{-- Image used in verification attempt --}}
+            {{-- Image used in verification attempt (traditional image upload) --}}
             @if($errorImagePath)
                 <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid #f5c6cb;">
                     <p style="margin:0 0 0.5rem 0; font-weight:bold;">Image used for verification:</p>
                     <img src="{{ route('stepup.error_image') }}?t={{ time() }}" alt="Verification attempt image" style="max-width:300px; max-height:300px; border:1px solid #f5c6cb; border-radius:4px;">
+                </div>
+            @endif
+
+            {{-- Reference image from Face Liveness verification --}}
+            @if(session('stepup_error_reference_image'))
+                <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid #f5c6cb;">
+                    <p style="margin:0 0 0.5rem 0; font-weight:bold;">Reference image from Face Liveness verification:</p>
+                    <img src="{{ route('stepup.liveness_verification_image') }}?t={{ time() }}" alt="Reference image from verification" style="max-width:300px; max-height:300px; border:1px solid #f5c6cb; border-radius:4px;">
                 </div>
             @endif
         </div>
@@ -140,12 +174,10 @@
                     livenessVerificationCompleted = true;
                     window.location.href = '{{ session("stepup_intended.url", route("dashboard")) }}';
                 } else {
-                    // Verification failed - submit form to show error area
-                    console.log('Face Liveness verification failed, submitting form...', result);
-                    if (result.sessionId) {
-                        document.getElementById('liveness_session_id').value = result.sessionId;
-                        document.getElementById('liveness-verification-form').submit();
-                    }
+                    // Verification failed - error is shown directly in React component
+                    // No need to submit form since component handles error display
+                    console.log('Face Liveness verification failed', result);
+                    // Error details are already shown in the React component
                 }
             };
 

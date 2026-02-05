@@ -67,10 +67,18 @@ class StepUpController extends Controller
 
     /**
      * Serve the Face Liveness verification reference image from S3.
+     * For error UI, always use the error reference image (most recent attempt).
+     * For success UI, use the success reference image.
      */
     public function livenessVerificationImage(Request $request): StreamedResponse|\Illuminate\Http\Response
     {
-        $s3Object = $request->session()->get('stepup_liveness_verification_image');
+        // Check if this is for error display - always use error reference image
+        $s3Object = $request->session()->get('stepup_error_reference_image');
+        
+        // If no error image, fall back to success image
+        if (!$s3Object) {
+            $s3Object = $request->session()->get('stepup_liveness_verification_image');
+        }
 
         if (!$s3Object || !isset($s3Object['Bucket']) || !isset($s3Object['Name'])) {
             abort(404);
@@ -163,8 +171,8 @@ class StepUpController extends Controller
                     // Liveness passed but face match failed
                     $request->session()->flash('stepup_error_message', 'Face Liveness passed but no matching face found for your registered image');
                     $request->session()->flash('stepup_error_details', [
-                        'LivenessConfidence' => $livenessConfidence,
-                        'FaceMatches' => $searchResult['FaceMatches'] ?? [],
+                        'liveness_result' => $livenessResult,
+                        'search_result' => $searchResult,
                         'Message' => 'Face matched but similarity was below threshold or did not match your user ID',
                     ]);
                     return back()->withErrors(['liveness' => 'Face verification failed - no matching face found']);
@@ -173,8 +181,8 @@ class StepUpController extends Controller
                 // No face match found
                 $request->session()->flash('stepup_error_message', 'Face Liveness verification completed but no face matched your registered image');
                 $request->session()->flash('stepup_error_details', [
-                    'LivenessConfidence' => $livenessConfidence,
-                    'FaceMatches' => [],
+                    'liveness_result' => $livenessResult,
+                    'search_result' => [],
                     'Message' => 'No matching face found in the Rekognition collection',
                 ]);
                 return back()->withErrors(['liveness' => 'Face verification failed']);

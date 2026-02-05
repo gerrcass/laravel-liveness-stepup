@@ -57,6 +57,22 @@ class RekognitionService
     }
 
     /**
+     * Search for faces using image bytes (for use with Face Liveness reference images).
+     * Does NOT throw exception - returns array with FaceMatches.
+     */
+    public function searchFaceFromBytes(string $imageBytes, string $collectionId = 'users', float $threshold = 60.0): array
+    {
+        $result = $this->client->searchFacesByImage([
+            'CollectionId' => $collectionId,
+            'Image' => ['Bytes' => $imageBytes],
+            'FaceMatchThreshold' => $threshold,
+            'MaxFaces' => 10,
+        ]);
+
+        return $result->toArray();
+    }
+
+    /**
      * AWS Face Liveness API: Create a Face Liveness session for registration or verification
      * 
      * @param string|null $sessionName Optional session name/ID
@@ -106,7 +122,7 @@ class RekognitionService
     /**
      * Clean Face Liveness results by removing binary data for safe JSON storage
      */
-    private function cleanLivenessResultForStorage(array $livenessResult): array
+    public function cleanLivenessResultForStorage(array $livenessResult): array
     {
         $cleaned = $livenessResult;
         
@@ -174,7 +190,7 @@ class RekognitionService
      * Get reference image bytes from Face Liveness session results
      * Handles both direct Bytes and S3Object storage
      */
-    private function getReferenceImageBytes(array $sessionResults): string
+    public function getReferenceImageBytes(array $sessionResults): string
     {
         // Check if bytes are directly available
         if (isset($sessionResults['ReferenceImage']['Bytes'])) {
