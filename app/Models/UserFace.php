@@ -12,6 +12,7 @@ class UserFace extends Model
     protected $fillable = [
         'user_id',
         'registration_method',
+        'collection_name',
         'face_data',
         'liveness_data',
         'verification_status',

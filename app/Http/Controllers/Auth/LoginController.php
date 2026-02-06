@@ -28,8 +28,8 @@ class LoginController extends Controller
             
             if (!$hasFaceData) {
                 // User has no facial data - set flag for popup
-                $request->session()->put('needs_face_registration', true);
-                return redirect()->route('register.face');
+                // Modal will be shown on dashboard via app.blade.php
+                return redirect()->route('dashboard');
             }
             
             return redirect()->intended('/dashboard');

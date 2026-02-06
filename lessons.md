@@ -807,3 +807,120 @@ aws rekognition list-collections
 # Verificar qué colección se está usando
 aws rekognition list-faces --collection-id "mi-coleccion"
 ```
+
+## Conflicto de Callbacks JavaScript entre Layout y Páginas
+
+### Problema: Callbacks de Face Liveness Interferidos
+
+**Síntoma**: La verificación de Face Liveness en `/step-up` fallaba con errores "Server issue" y la página mostraba el modal de registro facial en lugar del componente de verificación.
+
+**Causa Raíz**: El layout `app.blade.php` definía globalmente `window.onLivenessComplete` y `window.onLivenessError` que sobrescribían los callbacks definidos específicamente en la página `/step-up`. Esto causaba:
+- El callback del step-up nunca se ejecutaba
+- Errores de referencia nula al intentar acceder a elementos del modal
+- Pérdida del flujo de verificación
+
+**Código problemático**:
+```javascript
+// app.blade.php - siempre definía estos callbacks
+export default function initializeFaceLiveness(onComplete, onError) {
+    window.onLivenessComplete = function(result) {
+        livenessCompleted = true;
+        const sessionInput = document.getElementById('modal_liveness_session_id'); // null en /step-up
+        // Error: Cannot set property 'value' of null
+    };
+}
+```
+
+**Solución**: Verificar si los callbacks ya están definidos antes de sobrescribirlos:
+```javascript
+// Solo definir si no están ya definidos por scripts de página específica
+if (typeof window.onLivenessComplete === 'undefined') {
+    window.onLivenessComplete = function(result) {
+        // ... código del callback global
+    };
+}
+
+if (typeof window.onLivenessError === 'undefined') {
+    window.onLivenessError = function(error) {
+        console.error('Face Liveness error:', error);
+    };
+}
+```
+
+**Perspectiva Clave**: Cuando múltiples scripts definen callbacks globales, usar verificación de tipo `typeof === 'undefined'` para evitar sobrescribir callbacks específicos de página que necesitan ejecutarse.
+
+## Registro Facial en Dashboard con Modal
+
+### Implementación de Flujo de Registro Modal
+
+**Contexto**: Se implementó un popup modal en el dashboard para que usuarios sin cara registrada puedan completar su registro facial sin ser redirigidos a una página separada.
+
+**Componentes del Modal**:
+1. **Detección de Usuario sin Cara**: El layout verifica si el usuario tiene `userFace` registrado
+2. **Renderizado Condicional**: El modal solo se muestra si `!$hasFaceImage && auth()->check() && !session('face_registration_completed')`
+3. **Métodos de Registro**: Soporta tanto "Imagen Facial" como "Face Liveness"
+4. **Envío AJAX**: El formulario usa fetch para enviar sin recarga de página
+5. **Manejo de Errores**: Muestra mensajes de error/success dentro del modal
+6. **Sesión de Completado**: Evita mostrar el modal después de registro exitoso
+
+**Estructura del Modal**:
+```blade
+@if(!$hasFaceImage && auth()->check() && !session('face_registration_completed'))
+<div id="face-registration-modal" class="modal-overlay active">
+    <div class="modal-content">
+        <!-- Método de selección -->
+        <input type="radio" name="registration_method" value="image" checked>
+        <input type="radio" name="registration_method" value="liveness">
+        
+        <!-- Contenido según método -->
+        <div id="modal-image-method">...</div>
+        <div id="modal-liveness-method">...</div>
+        
+        <!-- Formulario -->
+        <form id="face-registration-form">
+            @csrf
+            <button type="submit">Registrar</button>
+            <button type="button" onclick="closeFaceModal()">Cancelar</button>
+        </form>
+    </div>
+</div>
+@endif
+```
+
+**Lógica JavaScript**:
+```javascript
+document.addEventListener('DOMContentLoaded', function() {
+    // No mostrar modal en /register/face (ruta legacy)
+    if (window.location.pathname === '/register/face') {
+        modal.classList.remove('active');
+    }
+});
+
+async function handleSubmit(e) {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    
+    const response = await fetch('{{ route("register.face.store") }}', {
+        method: 'POST',
+        body: formData,
+    });
+    
+    if (response.ok && data.success) {
+        // Cerrar modal y recargar página
+        setTimeout(() => {
+            closeFaceModal();
+            window.location.reload();
+        }, 1500);
+    }
+}
+```
+
+**Modificación de LoginController**:
+El LoginController fue modificado para redirigir al dashboard en lugar de `/register/face`, permitiendo que el modal se muestre allí:
+```php
+// Redirect al dashboard - el modal se mostrará desde el layout
+return redirect()->route('dashboard');
+```
+
+**Perspectiva Clave**: Mantener la experiencia del usuario en contexto (dashboard) en lugar de redirigir a páginas separadas mejora la usabilidad y reduce la fricción en el flujo de registro.
+

@@ -15,6 +15,23 @@
         .user-face-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid #ccc; vertical-align: middle; }
         .countdown-box { background: #e8f5e9; border: 1px solid #4caf50; padding: 0.5rem 1rem; border-radius: 6px; margin-bottom: 1rem; display: inline-block; }
         .countdown-box.expired { background: #ffebee; border-color: #f44336; }
+        
+        /* Modal styles */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal-content { background: white; padding: 2rem; border-radius: 8px; max-width: 600px; width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; }
+        .method-selection { margin: 1rem 0; padding: 1rem; border: 1px solid #ccc; border-radius: 4px; }
+        .method-option { margin: 0.5rem 0; }
+        .modal-buttons { margin-top: 1rem; display: flex; gap: 0.5rem; }
+        .btn { padding: 12px 24px; font-size: 16px; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-primary { background-color: #007bff; color: white; }
+        .btn-secondary { background-color: #6c757d; color: white; }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .hidden { display: none; }
+        .error-message { color: #dc3545; margin-top: 0.5rem; }
+        .success-message { color: #28a745; margin-top: 0.5rem; }
     </style>
 </head>
 <body>
@@ -53,11 +70,11 @@
             }
         @endphp
         <div class="user-info">
-            <span><strong>Bienvenido, {{ $user->name }}</strong> ({{ $user->email }})</span>
+            <span><strong>Bienvenido, {{ $user->name }}</strong> ({{ $user->email }} | id: {{ $user->id }})</span>
             @if($hasFaceImage)
                 @php
                     $methodLabel = $userFace && $userFace->registration_method === 'liveness' ? 'liveness' : 'imagen';
-                    $collectionName = config('rekognition.collection_name', 'users');
+                    $collectionName = $userFace->collection_name ?? config('rekognition.collection_name', 'users');
                 @endphp
                 <span> — Cara registrada ({{ $methodLabel }} en {{ $collectionName }}):</span>
                 <img src="{{ $faceImageUrl }}" alt="Cara registrada" class="user-face-thumb" title="Imagen facial con la que te registraste">
@@ -101,5 +118,196 @@
     @endauth
 
     @yield('content')
+
+    <!-- Face Registration Modal -->
+    @if(!$hasFaceImage && auth()->check() && !session('face_registration_completed'))
+    <div id="face-registration-modal" class="modal-overlay active">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 style="margin: 0;">Registro de Información Facial</h2>
+                <button type="button" class="modal-close" onclick="closeFaceModal()">&times;</button>
+            </div>
+            
+            <p>Para acceder a todas las funciones de la aplicación, necesitas registrar tu información facial.</p>
+            
+            <form id="face-registration-form" enctype="multipart/form-data">
+                @csrf
+                
+                <div class="method-selection">
+                    <h3 style="margin-top: 0;">Método de Registro</h3>
+                    <div class="method-option">
+                        <input type="radio" id="modal_method_image" name="registration_method" value="image" checked>
+                        <label for="modal_method_image">Imagen Facial (subir foto)</label>
+                    </div>
+                    <div class="method-option">
+                        <input type="radio" id="modal_method_liveness" name="registration_method" value="liveness">
+                        <label for="modal_method_liveness">Face Liveness (video selfie)</label>
+                    </div>
+                </div>
+
+                <!-- Image upload method -->
+                <div id="modal-image-method" class="method-content">
+                    <div style="margin: 1rem 0;">
+                        <label for="modal_face_image">Selecciona una imagen de tu rostro:</label><br>
+                        <input type="file" id="modal_face_image" name="face_image" accept="image/*" required>
+                    </div>
+                </div>
+
+                <!-- Face Liveness method -->
+                <div id="modal-liveness-method" class="method-content hidden">
+                    <div id="modal-liveness-container" style="margin: 1rem 0;">
+                        <div id="modal-face-liveness-root"></div>
+                    </div>
+                    <input type="hidden" id="modal_liveness_session_id" name="liveness_session_id" value="">
+                </div>
+
+                <div id="modal-form-message" class="error-message"></div>
+
+                <div class="modal-buttons">
+                    <button type="submit" id="modal-submit-btn" class="btn btn-primary">Registrar</button>
+                    <button type="button" id="modal-cancel-btn" class="btn btn-secondary" onclick="closeFaceModal()">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    @endif
+
+    <script>
+        let livenessCompleted = false;
+        let currentMethod = 'image';
+
+        // Auto-show modal if user has no face registered
+        document.addEventListener('DOMContentLoaded', function() {
+            const modal = document.getElementById('face-registration-modal');
+            if (modal) {
+                // Don't auto-show on /register/face page (legacy)
+                if (window.location.pathname === '/register/face') {
+                    modal.classList.remove('active');
+                }
+            }
+        });
+
+        function closeFaceModal() {
+            const modal = document.getElementById('face-registration-modal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+
+        function showFaceModal() {
+            const modal = document.getElementById('face-registration-modal');
+            if (modal) {
+                modal.classList.add('active');
+            }
+        }
+
+        // Method selection
+        const modalForm = document.getElementById('face-registration-form');
+        if (modalForm) {
+            modalForm.querySelectorAll('input[name="registration_method"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    currentMethod = this.value;
+                    modalForm.querySelectorAll('.method-content').forEach(el => el.classList.add('hidden'));
+                    const methodEl = document.getElementById('modal-' + currentMethod + '-method');
+                    if (methodEl) {
+                        methodEl.classList.remove('hidden');
+                    }
+                    
+                    if (currentMethod === 'liveness') {
+                        loadModalFaceLivenessComponent();
+                    }
+                });
+            });
+
+            // Handle form submission via AJAX
+            modalForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(this);
+                const messageEl = document.getElementById('modal-form-message');
+                const submitBtn = document.getElementById('modal-submit-btn');
+                
+                // Validation
+                if (currentMethod === 'liveness' && !livenessCompleted) {
+                    if (messageEl) {
+                        messageEl.textContent = 'Por favor complete el proceso de Face Liveness antes de continuar.';
+                        messageEl.className = 'error-message';
+                    }
+                    return false;
+                }
+                
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Registrando...';
+                if (messageEl) {
+                    messageEl.textContent = '';
+                }
+                
+                try {
+                    const response = await fetch('{{ route("register.face.store") }}', {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok && data.success) {
+                        if (messageEl) {
+                            messageEl.textContent = '¡Registro exitoso! Redirigiendo...';
+                            messageEl.className = 'success-message';
+                        }
+                        submitBtn.textContent = '¡Listo!';
+                        
+                        // Close modal and reload page after short delay
+                        setTimeout(() => {
+                            closeFaceModal();
+                            window.location.reload();
+                        }, 1500);
+                    } else {
+                        if (messageEl) {
+                            messageEl.textContent = data.message || 'Error al registrar. Por favor intenta de nuevo.';
+                            messageEl.className = 'error-message';
+                        }
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Registrar';
+                    }
+                } catch (error) {
+                    if (messageEl) {
+                        messageEl.textContent = 'Error de conexión. Por favor intenta de nuevo.';
+                        messageEl.className = 'error-message';
+                    }
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Registrar';
+                }
+            });
+        }
+
+        // Liveness callbacks - only define if not already defined by page-specific script
+        if (typeof window.onLivenessComplete === 'undefined') {
+            window.onLivenessComplete = function(result) {
+                if (result.success) {
+                    livenessCompleted = true;
+                    // Only set values if modal form exists (registration modal)
+                    const sessionInput = document.getElementById('modal_liveness_session_id');
+                    const submitBtn = document.getElementById('modal-submit-btn');
+                    if (sessionInput) {
+                        sessionInput.value = result.sessionId;
+                    }
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                    }
+                }
+            };
+        }
+
+        // Liveness error callback - only define if not already defined by page-specific script
+        if (typeof window.onLivenessError === 'undefined') {
+            window.onLivenessError = function(error) {
+                console.error('Face Liveness error:', error);
+            };
+        }
+    </script>
 </body>
 </html>

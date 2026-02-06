@@ -156,6 +156,7 @@ class RekognitionController extends Controller
             if (!$userFace) {
                 $userFace = new \App\Models\UserFace();
                 $userFace->user_id = $user->id;
+                $userFace->collection_name = $rekognition->getCollectionId();
             }
             
             $userFace->registration_method = 'liveness';
@@ -292,6 +293,8 @@ class RekognitionController extends Controller
             $searchError = null;
             $faceConfidence = 0;
             $matchedExternalId = null;
+            $matches = [];
+            $allMatchesDetails = [];
             
             try {
                 $imageBytes = $rekognition->getReferenceImageBytes($sessionResults);
@@ -317,6 +320,7 @@ class RekognitionController extends Controller
             } catch (\Exception $e) {
                 // SearchFacesByImage failed - likely no faces in image
                 $searchError = $e->getMessage();
+                $matches = [];
                 logger('SearchFacesByImage failed', ['error' => $searchError]);
             }
             
