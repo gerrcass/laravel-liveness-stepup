@@ -187,7 +187,7 @@
 
             document.addEventListener('DOMContentLoaded', function() {
                 if (window.initializeFaceLiveness) {
-                    window.initializeFaceLiveness('verification');
+                    window.initializeFaceLiveness('verification', { threshold: {{ config('rekognition.confidence_threshold', 85.0) }} });
                 }
             });
         </script>

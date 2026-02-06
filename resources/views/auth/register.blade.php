@@ -135,7 +135,7 @@
             
             // This will be handled by the React component
             if (window.initializeFaceLiveness) {
-                window.initializeFaceLiveness('registration');
+                window.initializeFaceLiveness('registration', { threshold: {{ config('rekognition.confidence_threshold', 85.0) }} });
             }
         }
 

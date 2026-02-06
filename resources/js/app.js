@@ -9,7 +9,7 @@ if (typeof window !== 'undefined') {
     window.Amplify = Amplify;
 }
 
-window.initializeFaceLiveness = function(purpose = 'verification') {
+window.initializeFaceLiveness = function(purpose = 'verification', options = {}) {
     const container = document.getElementById('face-liveness-root');
     if (!container) {
         console.error('Face Liveness container not found');
@@ -17,6 +17,10 @@ window.initializeFaceLiveness = function(purpose = 'verification') {
     }
 
     const root = createRoot(container);
+    
+    // Get threshold from options or global window variable (set by Blade template)
+    const threshold = options.threshold ?? window.REKOGNITION_CONFIDENCE_THRESHOLD ?? 85.0;
+    console.log('FaceLivenessDetector initialized with threshold:', threshold);
 
     const handleComplete = (result) => {
         console.log('Face Liveness completed:', result);
@@ -48,7 +52,8 @@ window.initializeFaceLiveness = function(purpose = 'verification') {
         React.createElement(FaceLivenessDetector, {
             purpose: purpose,
             onComplete: handleComplete,
-            onError: handleError
+            onError: handleError,
+            threshold: threshold
         })
     );
 };

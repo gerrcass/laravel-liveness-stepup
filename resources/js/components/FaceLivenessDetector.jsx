@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
 
-const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError }) => {
+const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, threshold = 85.0 }) => {
     const [sessionId, setSessionId] = useState(null);
     const [credentials, setCredentials] = useState(null);
     const [region, setRegion] = useState(null);
@@ -142,7 +142,7 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                     message: result.message || 'Verification failed',
                     livenessConfidence: result.livenessConfidence,
                     faceConfidence: result.faceConfidence,
-                    threshold: result.threshold || 60,
+                    threshold: result.threshold ?? threshold,
                     livenessResult: result.livenessResult,
                     searchResult: result.searchResult,
                     searchError: result.searchError,
@@ -183,10 +183,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
         if (result.searchError && result.searchError.includes('no faces')) {
             return 'face_not_found';
         }
-        if (result.livenessConfidence !== undefined && result.livenessConfidence < (result.threshold || 60)) {
+        if (result.livenessConfidence !== undefined && result.livenessConfidence < (result.threshold ?? threshold)) {
             return 'low_liveness_confidence';
         }
-        if (result.faceConfidence !== undefined && result.faceConfidence < (result.threshold || 60)) {
+        if (result.faceConfidence !== undefined && result.faceConfidence < (result.threshold ?? threshold)) {
             return 'face_not_matched';
         }
         if (result.error === 'face_not_found') {
@@ -336,25 +336,33 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError })
                         margin: '1rem 0'
                     }}>
                         <h4 style={{ marginTop: 0 }}>Analysis Results</h4>
-                        <p style={{ margin: '0.25rem 0', color: '#6c757d' }}>
-                            <strong>Verified at:</strong> {timestamp}
-                        </p>
                         {errorDetails.livenessConfidence !== undefined && (
                             <p style={{
-                                color: errorDetails.livenessConfidence >= (errorDetails.threshold || 60) ? '#28a745' : '#dc3545'
+                                color: errorDetails.livenessConfidence >= (errorDetails.threshold ?? threshold) ? '#28a745' : '#dc3545',
+                                margin: '0.25rem 0'
                             }}>
-                                Liveness Confidence: {errorDetails.livenessConfidence.toFixed(1)}%
-                                <span style={{color: '#6c757d', fontSize: '0.9em'}}> ({(errorDetails.threshold || 60)}% required)</span>
+                                <strong>Liveness Confidence:</strong> {errorDetails.livenessConfidence.toFixed(1)}%
+                                <span style={{color: '#6c757d', fontSize: '0.9em'}}> ({(errorDetails.threshold ?? threshold).toFixed(1)}% required)</span>
                             </p>
                         )}
                         {errorDetails.faceConfidence !== undefined && (
                             <p style={{
-                                color: errorDetails.faceConfidence >= (errorDetails.threshold || 60) ? '#28a745' : '#dc3545'
+                                color: errorDetails.faceConfidence >= (errorDetails.threshold ?? threshold) ? '#28a745' : '#dc3545',
+                                margin: '0.25rem 0'
                             }}>
-                                Face Match Confidence: {errorDetails.faceConfidence.toFixed(1)}%
-                                <span style={{color: '#6c757d', fontSize: '0.9em'}}> ({(errorDetails.threshold || 60)}% required)</span>
+                                <strong>Face Match Confidence:</strong> {errorDetails.faceConfidence.toFixed(1)}%
+                                <span style={{color: '#6c757d', fontSize: '0.9em'}}> ({(errorDetails.threshold ?? threshold).toFixed(1)}% required)</span>
                             </p>
                         )}
+                        {errorDetails.faceId && (
+                            <p style={{ margin: '0.25rem 0' }}><strong>Face ID:</strong> {errorDetails.faceId}</p>
+                        )}
+                        {errorDetails.externalId && (
+                            <p style={{ margin: '0.25rem 0' }}><strong>User ID:</strong> {errorDetails.externalId}</p>
+                        )}
+                        <p style={{ margin: '0.25rem 0', color: '#6c757d' }}>
+                            <strong>Verified at:</strong> {timestamp}
+                        </p>
                     </div>
                 )}
 

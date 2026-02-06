@@ -753,3 +753,57 @@ if (!$s3Object) {
 
 - [Documentación de AWS Rekognition Face Liveness](https://docs.aws.amazon.com/rekognition/latest/dg/face-liveness.html)
 - [Componente Face Liveness de AWS Amplify UI](https://ui.docs.amplify.aws/react/connected-components/liveness)
+
+## Bug: Valores Hardcodeados en Lugar de Configurables
+
+### Problema: Valores de Colección y Umbral Ignorados
+
+**Síntoma**: La aplicación ignoraba la configuración de `REKOGNITION_COLLECTION_NAME` y `REKOGNITION_CONFIDENCE_THRESHOLD` del archivo `.env`, usando en su lugar valores hardcodeados.
+
+**Causa**: El código en `RekognitionController.php` tenía valores hardcodeados:
+```php
+// INCORRECTO - valores hardcodeados
+$searchResult = $rekognition->searchFaceFromBytes($imageBytes, 'users', 60.0);
+$success = ($faceConfidence >= 60.0 && $livenessConfidence >= 60.0);
+```
+
+**Investigación**:
+1. Verificar configuración: `config('rekognition.collection_name')` retornaba el valor correcto
+2. Verificar RekognitionService: `$service->getCollectionId()` retornaba el valor correcto
+3. Buscar hardcodeos: `search_and_replace` reveló `'users'` hardcodeado en RekognitionController.php:295
+
+**Solución**: Usar los métodos getter del RekognitionService:
+```php
+// CORRECTO - usar valores configurables
+$searchResult = $rekognition->searchFaceFromBytes(
+    $imageBytes,
+    $rekognition->getCollectionId(),
+    $rekognition->getConfidenceThreshold()
+);
+
+// Obtener umbral al inicio del método
+$threshold = $rekognition->getConfidenceThreshold();
+
+// Usar threshold en comparaciones
+$success = ($faceConfidence >= $threshold && $livenessConfidence >= $threshold);
+```
+
+**Perspectiva Clave**: Incluso cuando los valores de configuración se leen correctamente del `.env`, el código puede ignorarlos si hay valores hardcodeados en los controladores. Sempre usar los métodos getter del servicio en lugar de valores literales.
+
+### Verificación de Configuración en Tiempo de Ejecución
+
+Para depurar problemas de configuración, usar `php artisan tinker`:
+```php
+$service = new \App\Services\RekognitionService();
+echo "Collection ID: " . $service->getCollectionId() . "\n";
+echo "Confidence Threshold: " . $service->getConfidenceThreshold() . "\n";
+```
+
+**Comandos AWS CLI útiles**:
+```bash
+# Listar todas las colecciones
+aws rekognition list-collections
+
+# Verificar qué colección se está usando
+aws rekognition list-faces --collection-id "mi-coleccion"
+```

@@ -18,6 +18,14 @@
             $faceId = $verification['face_id'] ?? null;
             $externalId = $verification['external_id'] ?? null;
             $userId = Auth::id();
+            $threshold = config('rekognition.confidence_threshold', 85.0);
+            
+            // Get the actual FaceId from rekognition_response if available
+            $rekognitionResponse = $verification['rekognition_response'] ?? [];
+            $actualFaceId = null;
+            if (!empty($rekognitionResponse['FaceMatches'])) {
+                $actualFaceId = $rekognitionResponse['FaceMatches'][0]['Face']['FaceId'] ?? null;
+            }
         @endphp
 
         {{-- Success area with green styling --}}
@@ -38,21 +46,21 @@
                 @if($livenessConfidence !== null)
                     <p style="margin:0.25rem 0;">
                         <strong>Liveness Confidence:</strong>
-                        <span style="color: {{ $livenessConfidence >= 60 ? '#28a745' : '#dc3545' }};">
-                            {{ number_format($livenessConfidence, 1) }}%
+                        <span style="color: {{ $livenessConfidence >= $threshold ? '#28a745' : '#dc3545' }};">
+                            {{ number_format($livenessConfidence, 1) }}% ({{ number_format($threshold, 1) }}% required)
                         </span>
                     </p>
                 @endif
                 @if($confidence)
                     <p style="margin:0.25rem 0;">
                         <strong>Face Match Confidence:</strong>
-                        <span style="color: {{ $confidence >= 60 ? '#28a745' : '#dc3545' }};">
-                            {{ number_format($confidence, 1) }}% (passed)
+                        <span style="color: {{ $confidence >= $threshold ? '#28a745' : '#dc3545' }};">
+                            {{ number_format($confidence, 1) }}% ({{ number_format($threshold, 1) }}% required)
                         </span>
                     </p>
                 @endif
-                @if($faceId)
-                    <p style="margin:0.25rem 0;"><strong>Face ID:</strong> {{ $faceId }}</p>
+                @if($actualFaceId)
+                    <p style="margin:0.25rem 0;"><strong>Face ID:</strong> {{ $actualFaceId }}</p>
                 @endif
                 <p style="margin:0.25rem 0;">
                     <strong>User ID:</strong>

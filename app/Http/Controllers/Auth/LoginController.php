@@ -22,6 +22,16 @@ class LoginController extends Controller
 
         if (Auth::attempt($data)) {
             $request->session()->regenerate();
+            
+            $user = Auth::user();
+            $hasFaceData = $user->userFace !== null;
+            
+            if (!$hasFaceData) {
+                // User has no facial data - set flag for popup
+                $request->session()->put('needs_face_registration', true);
+                return redirect()->route('register.face');
+            }
+            
             return redirect()->intended('/dashboard');
         }
 

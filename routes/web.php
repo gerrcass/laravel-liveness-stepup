@@ -22,6 +22,10 @@ Route::get('/', function () {
 Route::get('/register', [RegisterController::class, 'show'])->name('register.show');
 Route::post('/register', [RegisterController::class, 'register'])->name('register');
 
+// Face registration route for users without facial data after login
+Route::get('/register/face', [RegisterController::class, 'showFaceRegistration'])->middleware('auth')->name('register.face');
+Route::post('/register/face', [RegisterController::class, 'storeFaceRegistration'])->middleware('auth')->name('register.face.store');
+
 use App\Http\Controllers\Auth\LoginController;
 
 Route::get('/login', [LoginController::class, 'show'])->name('login.show');

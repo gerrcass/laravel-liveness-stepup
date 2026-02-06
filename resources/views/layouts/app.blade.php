@@ -57,8 +57,9 @@
             @if($hasFaceImage)
                 @php
                     $methodLabel = $userFace && $userFace->registration_method === 'liveness' ? 'liveness' : 'imagen';
+                    $collectionName = config('rekognition.collection_name', 'users');
                 @endphp
-                <span> — Cara registrada ({{ $methodLabel }}):</span>
+                <span> — Cara registrada ({{ $methodLabel }} en {{ $collectionName }}):</span>
                 <img src="{{ $faceImageUrl }}" alt="Cara registrada" class="user-face-thumb" title="Imagen facial con la que te registraste">
             @else
                 <span style="color:#888;"> — Sin cara registrada</span>

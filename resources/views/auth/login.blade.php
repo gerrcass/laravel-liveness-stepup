@@ -20,5 +20,6 @@
         <br>
         <button type="submit">Login</button>
     </form>
+    <p>¿No tienes una cuenta? <a href="{{ url('/register') }}">Regístrate aquí</a></p>
 </body>
 </html>

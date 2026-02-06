@@ -17,6 +17,7 @@ Users can register with either a reference face image or Face Liveness, and subs
   - [Configuration](#configuration)
     - [AWS Credentials](#aws-credentials)
     - [Face Liveness Configuration](#face-liveness-configuration)
+    - [Rekognition Configuration](#rekognition-configuration)
   - [Running the Application](#running-the-application)
   - [Key Application Flow](#key-application-flow)
   - [Database Schema - user\_faces Table](#database-schema---user_faces-table)
@@ -150,6 +151,26 @@ AWS_S3_BUCKET=your-face-liveness-bucket
 
 **Important**: When `AWS_S3_BUCKET` is configured, Face Liveness reference images and audit images are stored in S3 instead of being returned as binary data in the API response. The system automatically downloads the reference image from S3 when needed.
 
+### Rekognition Configuration
+
+You can configure the following Rekognition settings:
+
+```dotenv
+# Face collection name (default: 'users')
+REKOGNITION_COLLECTION_NAME=your-collection-name
+
+# Confidence threshold for face matching (default: 60.0)
+REKOGNITION_CONFIDENCE_THRESHOLD=60.0
+
+# S3 prefix for traditional face registration images (default: 'image-sessions/')
+AWS_S3_IMAGE_PREFIX=image-sessions/
+
+# S3 prefix for Face Liveness session files (default: 'face-liveness-sessions/')
+AWS_S3_LIVENESS_PREFIX=face-liveness-sessions/
+```
+
+**Note**: Face verification requires both liveness confidence >= threshold AND face similarity >= threshold to succeed.
+
 You can also configure the step-up verification timeout:
 
 ```dotenv
@@ -158,14 +179,20 @@ STEPUP_TIMEOUT=900
 
 ## Running the Application
 
-1.  **Start the Development Server**
+1.  **Build Frontend Assets**
+    Run Vite to compile React assets.
+    ```bash
+    npm run build
+    ```
+
+2.  **Start the Development Server**
 
     ```bash
     php artisan serve
     ```
 
-2.  **Build Frontend Assets**
-    Run the Vite development server in a separate terminal.
+3.  **Watch Frontend Assets (Optional)**
+    Run the Vite development server in a separate terminal for live reloading.
     ```bash
     npm run dev
     ```

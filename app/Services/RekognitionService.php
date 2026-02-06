@@ -9,6 +9,12 @@ class RekognitionService
 {
     private RekognitionClient $client;
 
+    // Configuration from environment
+    private string $collectionId;
+    private float $confidenceThreshold;
+    private string $imagePrefix;
+    private string $livenessPrefix;
+
     public function __construct()
     {
         $this->client = new RekognitionClient([
@@ -16,10 +22,34 @@ class RekognitionService
             'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
             // credentials will be resolved by the SDK from env/profile
         ]);
+
+        // Load configuration from environment
+        $this->collectionId = env('REKOGNITION_COLLECTION_NAME', 'users_test');
+        $this->confidenceThreshold = (float) env('REKOGNITION_CONFIDENCE_THRESHOLD', 60.0);
+        $this->imagePrefix = env('AWS_S3_IMAGE_PREFIX', 'image-sessions/');
+        $this->livenessPrefix = env('AWS_S3_LIVENESS_PREFIX', 'face-liveness-sessions/');
     }
 
-    public function indexFace(string $imagePath, string $externalImageId, string $collectionId = 'users') : array
+    /**
+     * Get the configured collection ID
+     */
+    public function getCollectionId(): string
     {
+        return $this->collectionId;
+    }
+
+    /**
+     * Get the configured confidence threshold
+     */
+    public function getConfidenceThreshold(): float
+    {
+        return $this->confidenceThreshold;
+    }
+
+    public function indexFace(string $imagePath, string $externalImageId, ?string $collectionId = null) : array
+    {
+        $collectionId = $collectionId ?? $this->collectionId;
+        
         // Ensure collection exists
         try {
             $this->client->createCollection(['CollectionId' => $collectionId]);
@@ -42,14 +72,14 @@ class RekognitionService
     /**
      * Used by the main step-up flow: search for a matching face in the collection (SearchFacesByImage).
      */
-    public function searchFace(string $imagePath, string $collectionId = 'users', float $threshold = 85.0)
+    public function searchFace(string $imagePath, ?string $collectionId = null, ?float $threshold = null)
     {
         $bytes = file_get_contents($imagePath);
-
+        
         $result = $this->client->searchFacesByImage([
-            'CollectionId' => $collectionId,
+            'CollectionId' => $collectionId ?? $this->collectionId,
             'Image' => ['Bytes' => $bytes],
-            'FaceMatchThreshold' => $threshold,
+            'FaceMatchThreshold' => $threshold ?? $this->confidenceThreshold,
             'MaxFaces' => 1,
         ]);
 
@@ -60,12 +90,12 @@ class RekognitionService
      * Search for faces using image bytes (for use with Face Liveness reference images).
      * Does NOT throw exception - returns array with FaceMatches.
      */
-    public function searchFaceFromBytes(string $imageBytes, string $collectionId = 'users', float $threshold = 60.0): array
+    public function searchFaceFromBytes(string $imageBytes, ?string $collectionId = null, ?float $threshold = null): array
     {
         $result = $this->client->searchFacesByImage([
-            'CollectionId' => $collectionId,
+            'CollectionId' => $collectionId ?? $this->collectionId,
             'Image' => ['Bytes' => $imageBytes],
-            'FaceMatchThreshold' => $threshold,
+            'FaceMatchThreshold' => $threshold ?? $this->confidenceThreshold,
             'MaxFaces' => 10,
         ]);
 
@@ -93,7 +123,7 @@ class RekognitionService
         if ($s3Bucket) {
             $params['Settings']['OutputConfig'] = [
                 'S3Bucket' => $s3Bucket,
-                'S3KeyPrefix' => 'face-liveness-sessions/',
+                'S3KeyPrefix' => $this->livenessPrefix,
             ];
         }
         
@@ -152,8 +182,10 @@ class RekognitionService
     /**
      * Index face from Face Liveness session results
      */
-    public function indexFaceFromLivenessSession(string $sessionId, string $externalImageId, string $collectionId = 'users', ?array $sessionResults = null): array
+    public function indexFaceFromLivenessSession(string $sessionId, string $externalImageId, ?string $collectionId = null, ?array $sessionResults = null): array
     {
+        $collectionId = $collectionId ?? $this->collectionId;
+        
         // Get liveness session results (either passed in or fetched from AWS)
         if ($sessionResults === null) {
             $sessionResults = $this->getFaceLivenessSessionResults($sessionId);
@@ -236,7 +268,7 @@ class RekognitionService
     /**
      * Verify face using Face Liveness session
      */
-    public function verifyFaceWithLiveness(string $sessionId, string $userId, string $collectionId = 'users', float $threshold = 85.0): array
+    public function verifyFaceWithLiveness(string $sessionId, string $userId, ?string $collectionId = null, ?float $threshold = null): array
     {
         // Get liveness session results
         $sessionResults = $this->getFaceLivenessSessionResults($sessionId);
@@ -246,9 +278,9 @@ class RekognitionService
 
         // Search for matching face using the reference image from liveness session
         $result = $this->client->searchFacesByImage([
-            'CollectionId' => $collectionId,
+            'CollectionId' => $collectionId ?? $this->collectionId,
             'Image' => ['Bytes' => $imageBytes],
-            'FaceMatchThreshold' => $threshold,
+            'FaceMatchThreshold' => $threshold ?? $this->confidenceThreshold,
             'MaxFaces' => 1,
         ]);
 
@@ -279,7 +311,7 @@ class RekognitionService
 
         // Generate unique key with image-sessions prefix
         $extension = pathinfo($imagePath, PATHINFO_EXTENSION) ?: 'jpg';
-        $key = sprintf('image-sessions/%s/%s.%s', $userId, uniqid(), $extension);
+        $key = sprintf('%s%s/%s.%s', $this->imagePrefix, $userId, uniqid(), $extension);
 
         // Get image bytes
         $imageBytes = file_get_contents($imagePath);

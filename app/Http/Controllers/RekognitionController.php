@@ -189,6 +189,9 @@ class RekognitionController extends Controller
         $user = $request->user();
         $sessionId = $request->input('sessionId');
 
+        // Get configurable confidence threshold
+        $threshold = $rekognition->getConfidenceThreshold();
+
         // Check if we're receiving data from the React component form submission
         $livenessResultJson = $request->input('liveness_result_json');
         $searchResultJson = $request->input('search_result_json');
@@ -218,7 +221,7 @@ class RekognitionController extends Controller
             }
             
             // Determine success
-            $success = ($faceConfidence >= 60.0 && $livenessConfidence >= 60.0);
+            $success = ($faceConfidence >= $threshold && $livenessConfidence >= $threshold);
             
             // Store error/reference image if available (from sessionResults, not livenessResult)
             if ($referenceImageUrl) {
@@ -229,7 +232,7 @@ class RekognitionController extends Controller
             }
             
             if (!$success) {
-                $errorMessage = $livenessConfidence < 60.0 
+                $errorMessage = $livenessConfidence < $threshold 
                     ? 'Face Liveness check did not meet security requirements'
                     : 'Face did not match your registered image';
                     
@@ -292,7 +295,11 @@ class RekognitionController extends Controller
             
             try {
                 $imageBytes = $rekognition->getReferenceImageBytes($sessionResults);
-                $searchResult = $rekognition->searchFaceFromBytes($imageBytes, 'users', 60.0);
+                $searchResult = $rekognition->searchFaceFromBytes(
+                    $imageBytes,
+                    $rekognition->getCollectionId(),
+                    $rekognition->getConfidenceThreshold()
+                );
                 
                 $matches = $searchResult['FaceMatches'] ?? [];
                 
@@ -320,7 +327,7 @@ class RekognitionController extends Controller
                 'searchError' => $searchError
             ]);
             
-            $success = ($faceConfidence >= 60.0 && $livenessConfidence >= 60.0);
+            $success = ($faceConfidence >= $threshold && $livenessConfidence >= $threshold);
 
             logger('FaceMatches count', ['count' => count($matches)]);
 
@@ -342,7 +349,7 @@ class RekognitionController extends Controller
                     $faceConfidence = $similarity;
                     $matchedExternalId = $externalId;
 
-                    if ($faceConfidence >= 60.0 && $livenessConfidence >= 60.0) {
+                    if ($faceConfidence >= $threshold && $livenessConfidence >= $threshold) {
                         $success = true;
 
                         // Mark session as verified
@@ -432,9 +439,9 @@ class RekognitionController extends Controller
 
             // Failure case - determine error message
             $errorMessage = '';
-            if ($livenessConfidence < 60.0) {
+            if ($livenessConfidence < $threshold) {
                 $errorMessage = 'Face Liveness check did not meet security requirements';
-            } elseif ($faceConfidence < 60.0) {
+            } elseif ($faceConfidence < $threshold) {
                 $errorMessage = 'Face did not match your registered image';
             } elseif ($searchError) {
                 // SearchFacesByImage failed - no faces detected

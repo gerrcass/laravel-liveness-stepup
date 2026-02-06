@@ -103,9 +103,12 @@ This project is a Laravel-based proof-of-concept for **step-up authentication us
 - **When adding new features**, first check `routes/web.php` to see if a similar route already exists.
 - **For database changes**, create a new migration file using `php artisan make:migration`.
 - **Adhere to Laravel conventions** for naming, routing, and code structure.
-- **Face Collection**: The application uses a Rekognition face collection (default: 'users') to store registered faces. Each face is indexed with the user's ID as the `ExternalImageId`.
-- **Verification Threshold**: Face verification requires a similarity confidence of at least 60% (configurable in `RekognitionService::searchFace()` and controllers). For Face Liveness, both liveness confidence >= 60% and face similarity >= 60% are required. Lower threshold was set to reduce false negatives during testing.
+- **Face Collection**: The application uses a Rekognition face collection (configurable via `REKOGNITION_COLLECTION_NAME` environment variable, default: 'users') to store registered faces. Each face is indexed with the user's ID as the `ExternalImageId`.
+- **Verification Threshold**: Face verification requires a similarity confidence of at least `REKOGNITION_CONFIDENCE_THRESHOLD` (default: 60%). For Face Liveness, both liveness confidence >= 60% and face similarity >= 60% are required. Lower threshold was set to reduce false negatives during testing.
 - **Session Timeout**: Step-up verification status expires after `STEPUP_TIMEOUT` seconds (default: 900, configurable via environment variable).
+- **S3 Prefix Configuration**: S3 key prefixes are configurable via environment variables:
+    - `AWS_S3_IMAGE_PREFIX`: Prefix for traditional face registration images (default: 'image-sessions/')
+    - `AWS_S3_LIVENESS_PREFIX`: Prefix for Face Liveness session files (default: 'face-liveness-sessions/')
 - **S3 Image Storage**: When `AWS_S3_BUCKET` is configured, Face Liveness sessions store reference images and audit images in S3. The system automatically downloads images from S3 when needed for indexing or verification.
 - **Binary Data Handling**: Face Liveness session results may contain binary image data that cannot be JSON encoded. The system implements `cleanLivenessResultForStorage()` to remove binary data before storage and `getReferenceImageBytes()` to download from S3 when needed.
 - **S3Object vs Bytes**: When `AWS_S3_BUCKET` is configured, Face Liveness results include `S3Object` instead of `Bytes` in `ReferenceImage`. The `getReferenceImageBytes()` method handles both cases transparently.

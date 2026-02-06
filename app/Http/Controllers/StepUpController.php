@@ -131,7 +131,7 @@ class StepUpController extends Controller
                     $externalId = $best['Face']['ExternalImageId'] ?? null;
                     $faceConfidence = $best['Similarity'] ?? 0;
 
-                    if ($externalId == (string) $user->id && $faceConfidence >= 60.0 && $livenessConfidence >= 60.0) {
+                    if ($externalId == (string) $user->id && $faceConfidence >= $rekognition->getConfidenceThreshold() && $livenessConfidence >= $rekognition->getConfidenceThreshold()) {
                         // Mark verified
                         $userFace->verification_status = 'verified';
                         $userFace->last_verified_at = now();
@@ -169,10 +169,14 @@ class StepUpController extends Controller
                     }
 
                     // Liveness passed but face match failed
+                    $faceIdFromSearch = $best['Face']['FaceId'] ?? null;
+                    $externalIdFromSearch = $best['Face']['ExternalImageId'] ?? null;
                     $request->session()->flash('stepup_error_message', 'Face Liveness passed but no matching face found for your registered image');
                     $request->session()->flash('stepup_error_details', [
                         'liveness_result' => $livenessResult,
                         'search_result' => $searchResult,
+                        'faceId' => $faceIdFromSearch,
+                        'externalId' => $externalIdFromSearch,
                         'Message' => 'Face matched but similarity was below threshold or did not match your user ID',
                     ]);
                     return back()->withErrors(['liveness' => 'Face verification failed - no matching face found']);
@@ -234,7 +238,7 @@ class StepUpController extends Controller
                 $confidence = $best['Similarity'] ?? ($best['Face']['Confidence'] ?? 0);
                 $userId = (string) $user->id;
 
-                if ($externalId == $userId && $confidence >= 60.0) {
+                if ($externalId == $userId && $confidence >= $rekognition->getConfidenceThreshold()) {
                     // mark verified
                     if ($userFace) {
                         $userFace->verification_status = 'verified';
