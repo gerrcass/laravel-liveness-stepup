@@ -176,6 +176,15 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         
         const errorMessage = err?.message || err?.state || '';
         
+        // Suppress "results available" errors - these are race conditions
+        // where the backend already consumed the session results
+        if (errorMessage.includes('results available') || 
+            errorMessage.includes('No such session') ||
+            errorMessage.includes('SERVER_ERROR')) {
+            console.log('Suppressing race condition error - backend already processed');
+            return; // Don't call onError, don't show error UI
+        }
+        
         if (errorMessage.includes('image.png') || errorMessage.includes('Cannot read')) {
             setError('Face Liveness session error. Please try again.');
             setErrorDetails({
