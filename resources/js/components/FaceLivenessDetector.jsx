@@ -7,12 +7,17 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
     const [region, setRegion] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isVerifying, setIsVerifying] = useState(false);
+    const [isBackendProcessing, setIsBackendProcessing] = useState(false);
     const [error, setError] = useState(null);
     const [errorDetails, setErrorDetails] = useState(null);
     const [showHints, setShowHints] = useState(false);
     const [lastResult, setLastResult] = useState(null);
     const [componentReady, setComponentReady] = useState(false);
     const mountRef = useRef(false);
+    // Track if backend already processed successfully
+    const backendSuccessRef = useRef(false);
+    // Track if we should suppress errors (race condition detected)
+    const suppressErrorsRef = useRef(false);
 
     useEffect(() => {
         mountRef.current = true;
@@ -30,12 +35,15 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         setLastResult(null);
         setShowHints(false);
         setComponentReady(false);
+        // Reset flags for new attempt
+        backendSuccessRef.current = false;
+        suppressErrorsRef.current = false;
         console.log('createSession called, purpose:', purpose);
 
         try {
             let endpoint;
             if (purpose === 'registration') {
-                endpoint = '/api/rekognition/create-face-liveness-session-registration';
+                endpoint = '/rekognition/create-face-liveness-session-registration';
             } else {
                 endpoint = '/rekognition/create-face-liveness-session';
             }
@@ -83,7 +91,6 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         console.log('Analysis result:', analysisResult);
 
         if (!sessionId || !mountRef.current) {
-            // Ensure isVerifying is reset even on early return
             if (mountRef.current) {
                 setIsVerifying(false);
             }
@@ -91,14 +98,15 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         }
 
         setIsVerifying(true);
+        setIsBackendProcessing(true);
         setError(null);
         setErrorDetails(null);
 
         try {
             // Call the appropriate backend endpoint based on purpose
-            // IMPORTANT: We must call this BEFORE the component's internal result retrieval
+            // The backend handles race condition with retry logic
             const endpoint = purpose === 'registration' 
-                ? '/api/rekognition/complete-liveness-registration-guest'
+                ? '/rekognition/complete-liveness-registration-guest'
                 : '/rekognition/complete-liveness-verification';
             console.log('Calling completion endpoint:', endpoint);
 
@@ -113,7 +121,13 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
 
             const result = await response.json();
             console.log('Completion result:', result);
+            console.log('Retries used:', result.retries);
             setLastResult(result);
+            
+            // Mark that backend processed successfully
+            if (result.success) {
+                backendSuccessRef.current = true;
+            }
 
             // Store session ID in hidden form field (for verification form submission)
             const sessionIdInput = document.getElementById('liveness_session_id');
@@ -126,13 +140,13 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
                 window.livenessCompleted = true;
             }
 
+            // Clear suppression flag since we got a definitive result
+            suppressErrorsRef.current = false;
+
             if (result.success) {
                 if (purpose === 'verification') {
-                    // For verification, the backend already verified the face
-                    // Just call onComplete to trigger redirect
                     onComplete?.(result);
                 } else {
-                    // For registration, the backend indexed the face
                     onComplete?.(result);
                 }
             } else if (!result.success) {
@@ -174,9 +188,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         } finally {
             if (mountRef.current) {
                 setIsVerifying(false);
+                setIsBackendProcessing(false);
             }
         }
-    }, [sessionId, purpose, onComplete, onError]);
+    }, [sessionId, purpose, onComplete, onError, threshold]);
 
     const getErrorType = (result) => {
         // Check for search error (no faces detected)
@@ -200,15 +215,45 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         console.error('Error state:', err.state);
         console.error('Error details:', err);
 
-        // If we already have a successful result from the backend, suppress this error completely
-        // This happens because the component tries to get results after the callback completes,
-        // but the backend already consumed them
-        if (lastResult && lastResult.success) {
+        // Check if this is a "results already consumed" error
+        // This happens when our backend already consumed the session results,
+        // and the component internally tries to get them too
+        const errorMessage = err.message || err.state || '';
+        const isResultsAlreadyConsumed = errorMessage.includes('results available') 
+            || errorMessage.includes('No such session');
+
+        // Check if we already have a successful result from the backend
+        // If so, suppress this error completely
+        if (backendSuccessRef.current && lastResult?.success) {
             console.log('Suppressing component error - backend already processed successfully');
-            return; // Don't call onError, don't show error UI
+            clearErrorState();
+            return;
         }
 
-        const errorMessage = err.message || err.state || 'Face Liveness error occurred';
+        // If we're still waiting for backend response, suppress errors temporarily
+        if (isBackendProcessing && !lastResult) {
+            console.log('Suppressing component error - backend is still processing');
+            suppressErrorsRef.current = true;
+            return;
+        }
+
+        // If backend returned an error (but we still need to suppress component's internal error)
+        if (isResultsAlreadyConsumed && lastResult && (lastResult.success || lastResult.error)) {
+            console.log('Detected race condition - component tried to get consumed results');
+            // If backend already gave us a result, suppress component error
+            if (lastResult.success) {
+                clearErrorState();
+                return;
+            }
+            // If backend failed, show that error instead
+            suppressErrorsRef.current = false;
+        }
+
+        if (suppressErrorsRef.current) {
+            console.log('Suppressing error due to race condition');
+            clearErrorState();
+            return;
+        }
 
         if (errorMessage.includes('image.png') || errorMessage.includes('Cannot read')) {
             setError('Face Liveness session error. Please try again.');
@@ -219,7 +264,7 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
             });
             setShowHints(true);
         } else {
-            setError(errorMessage);
+            setError(errorMessage || 'Face Liveness error occurred');
             setErrorDetails({
                 type: 'component',
                 message: errorMessage,
@@ -228,7 +273,34 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
             setShowHints(true);
         }
         onError?.(err);
-    }, [lastResult, onError]);
+    }, [lastResult, onError, isBackendProcessing]);
+
+    const clearErrorState = () => {
+        setError(null);
+        setErrorDetails(null);
+        setShowHints(false);
+        
+        // Force remove any error overlay DOM elements that AWS Amplify might have created
+        setTimeout(() => {
+            const errorSelectors = [
+                '.amplify-modal__overlay',
+                '.amplify-error',
+                '[class*="error"]',
+                '[class*="toast"]',
+                '[role="alert"]'
+            ];
+            errorSelectors.forEach(selector => {
+                document.querySelectorAll(selector).forEach(el => {
+                    const text = el.innerText || '';
+                    if (text.includes('Server issue') || 
+                        text.includes('Cannot complete') ||
+                        text.includes('results available')) {
+                        el.remove();
+                    }
+                });
+            });
+        }, 100);
+    };
 
     const getHintsForError = (errorType) => {
         const hints = {
@@ -287,6 +359,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         setLastResult(null);
         setShowHints(false);
         setComponentReady(false);
+        setIsBackendProcessing(false);
+        // Reset flags for new attempt
+        backendSuccessRef.current = false;
+        suppressErrorsRef.current = false;
     };
 
     const credentialProvider = useCallback(async () => {

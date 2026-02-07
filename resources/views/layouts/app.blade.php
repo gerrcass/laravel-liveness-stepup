@@ -149,7 +149,7 @@
                 <div id="modal-image-method" class="method-content">
                     <div style="margin: 1rem 0;">
                         <label for="modal_face_image">Selecciona una imagen de tu rostro:</label><br>
-                        <input type="file" id="modal_face_image" name="face_image" accept="image/*" required>
+                        <input type="file" id="modal_face_image" name="face_image" accept="image/*">
                     </div>
                 </div>
 
@@ -234,6 +234,20 @@
                         messageEl.className = 'error-message';
                     }
                     return false;
+                }
+                
+                // Validate image method
+                if (currentMethod === 'image') {
+                    const fileInput = document.getElementById('modal_face_image');
+                    if (!fileInput.files || fileInput.files.length === 0) {
+                        if (messageEl) {
+                            messageEl.textContent = 'Por favor seleccione una imagen facial.';
+                            messageEl.className = 'error-message';
+                        }
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Registrar';
+                        return false;
+                    }
                 }
                 
                 submitBtn.disabled = true;

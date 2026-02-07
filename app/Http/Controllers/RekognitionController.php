@@ -38,9 +38,10 @@ class RekognitionController extends Controller
     }
 
     /** Complete Face Liveness registration for guest users (no auth required)
-     * 
-     * IMPORTANT: This endpoint must be called BEFORE the frontend callback completes.
-     * The frontend should call this endpoint and wait for response before returning from callback.
+     *
+     * IMPORTANT: This endpoint handles a race condition where the AWS Amplify component
+     * internally calls GetFaceLivenessSessionResults before the backend can.
+     * We implement retry logic with exponential backoff to handle this.
      */
     public function completeLivenessRegistrationGuest(Request $request, RekognitionService $rekognition)
     {
@@ -49,31 +50,69 @@ class RekognitionController extends Controller
         ]);
 
         $sessionId = $request->input('sessionId');
+        $maxRetries = 5;
+        $initialDelayMs = 100;
 
-        try {
-            // Get liveness session results FIRST (before frontend consumes them)
-            $livenessResult = $rekognition->getFaceLivenessSessionResults($sessionId);
-            
-            // Clean liveness result for session storage (exclude all binary data)
-            $livenessResultForStorage = $this->cleanLivenessResultForStorage($livenessResult);
-            
-            // Store session ID and results in session for later use during registration
-            $request->session()->put('pending_liveness_session_id', $sessionId);
-            $request->session()->put('pending_liveness_result', $livenessResultForStorage);
+        // Retry loop with exponential backoff
+        for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
+            try {
+                // Get liveness session results
+                $livenessResult = $rekognition->getFaceLivenessSessionResults($sessionId);
+                
+                // Check if we got valid results
+                if (!isset($livenessResult['SessionId']) || !isset($livenessResult['ReferenceImage'])) {
+                    // Results not ready yet, retry
+                    if ($attempt < $maxRetries - 1) {
+                        $delayMs = $initialDelayMs * pow(2, $attempt);
+                        usleep($delayMs * 1000); // Convert to microseconds
+                        continue;
+                    }
+                    throw new \Exception('Invalid liveness session results');
+                }
+                
+                // Clean liveness result for session storage (exclude all binary data)
+                $livenessResultForStorage = $this->cleanLivenessResultForStorage($livenessResult);
+                
+                // Store session ID and results in session for later use during registration
+                $request->session()->put('pending_liveness_session_id', $sessionId);
+                $request->session()->put('pending_liveness_result', $livenessResultForStorage);
 
-            return response()->json([
-                'success' => true,
-                'verified' => true,
-                'sessionId' => $sessionId,
-                'confidence' => $livenessResult['Confidence'] ?? 0,
-                'message' => 'Face Liveness session completed successfully',
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'success' => false,
-                'error' => $e->getMessage(),
-            ], 400);
+                return response()->json([
+                    'success' => true,
+                    'verified' => true,
+                    'sessionId' => $sessionId,
+                    'confidence' => $livenessResult['Confidence'] ?? 0,
+                    'message' => 'Face Liveness session completed successfully',
+                    'retries' => $attempt,
+                ]);
+            } catch (\Exception $e) {
+                $errorMessage = $e->getMessage();
+                
+                // Check if this is a "results not available" error (race condition)
+                $isResultsNotAvailable = strpos($errorMessage, 'results available') !== false 
+                    || strpos($errorMessage, 'No such session') !== false;
+                
+                if ($isResultsNotAvailable && $attempt < $maxRetries - 1) {
+                    // Race condition: frontend consumed results first, wait and retry
+                    $delayMs = $initialDelayMs * pow(2, $attempt);
+                    logger("Race condition detected (attempt $attempt/$maxRetries), waiting {$delayMs}ms before retry");
+                    usleep($delayMs * 1000);
+                    continue;
+                }
+                
+                // Max retries exceeded or non-recoverable error
+                return response()->json([
+                    'success' => false,
+                    'error' => $errorMessage,
+                    'retries' => $attempt,
+                ], 400);
+            }
         }
+        
+        return response()->json([
+            'success' => false,
+            'error' => 'Failed to retrieve liveness session results after maximum retries',
+        ], 400);
     }
 
     /**

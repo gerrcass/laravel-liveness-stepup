@@ -924,3 +924,138 @@ return redirect()->route('dashboard');
 
 **Perspectiva Clave**: Mantener la experiencia del usuario en contexto (dashboard) en lugar de redirigir a páginas separadas mejora la usabilidad y reduce la fricción en el flujo de registro.
 
+---
+
+## Race Condition con AWS Amplify FaceLivenessDetectorCore
+
+### Problema: El Componente Consume los Resultados de la Sesión Antes que el Backend
+
+**Síntoma**: Error `ValidationException: Liveness session has results available. Please get results for the session.`
+
+**Causa Raíz**: El componente `FaceLivenessDetectorCore` de AWS Amplify internamente llama a `GetFaceLivenessSessionResults` después de completar el análisis. Esto causa un race condition cuando:
+
+1. Frontend inicia sesión Face Liveness
+2. Usuario completa el challenge
+3. Frontend callback llama al backend (`/complete-liveness-registration-guest`)
+4. Backend llama a `GetFaceLivenessSessionResults`
+5. Component internamente también llama a `GetFaceLivenessSessionResults`
+6. Uno de los dos falla porque los resultados ya fueron consumidos
+
+**Solución: Retry con Exponential Backoff en el Backend**
+
+El backend ahora implementa retry automático con exponential backoff:
+
+```php
+public function completeLivenessRegistrationGuest(Request $request, RekognitionService $rekognition)
+{
+    $sessionId = $request->input('sessionId');
+    $maxRetries = 5;
+    $initialDelayMs = 100;
+
+    for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
+        try {
+            $livenessResult = $rekognition->getFaceLivenessSessionResults($sessionId);
+            // Verificar que tenemos resultados válidos
+            if (!isset($livenessResult['SessionId']) || !isset($livenessResult['ReferenceImage'])) {
+                // Resultados no listos aún, reintentar
+                if ($attempt < $maxRetries - 1) {
+                    $delayMs = $initialDelayMs * pow(2, $attempt);
+                    usleep($delayMs * 1000);
+                    continue;
+                }
+                throw new \Exception('Invalid liveness session results');
+            }
+            
+            // Procesar resultados...
+            return response()->json(['success' => true, 'retries' => $attempt]);
+            
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            $isResultsNotAvailable = strpos($errorMessage, 'results available') !== false 
+                || strpos($errorMessage, 'No such session') !== false;
+            
+            if ($isResultsNotAvailable && $attempt < $maxRetries - 1) {
+                // Race condition: frontend consumió resultados primero, esperar y reintentar
+                $delayMs = $initialDelayMs * pow(2, $attempt);
+                logger("Race condition detected (attempt $attempt/$maxRetries), waiting {$delayMs}ms");
+                usleep($delayMs * 1000);
+                continue;
+            }
+            
+            return response()->json(['error' => $errorMessage], 400);
+        }
+    }
+}
+```
+
+**Solución: Supresión de Errores en el Frontend**
+
+El componente React ahora detecta y suprime errores relacionados con race condition:
+
+```javascript
+const handleError = useCallback((err) => {
+    const errorMessage = err.message || err.state || '';
+    const isResultsAlreadyConsumed = errorMessage.includes('results available') 
+        || errorMessage.includes('No such session');
+
+    // Si el backend ya tuvo éxito, suprimir este error
+    if (backendSuccessRef.current && lastResult?.success) {
+        console.log('Suppressing component error - backend already processed');
+        clearErrorState();
+        return;
+    }
+
+    // Si estamos esperando respuesta del backend, suprimir temporalmente
+    if (isBackendProcessing && !lastResult) {
+        suppressErrorsRef.current = true;
+        return;
+    }
+
+    // Si el componente intenta obtener resultados ya consumidos...
+    if (isResultsAlreadyConsumed && lastResult) {
+        if (lastResult.success) {
+            clearErrorState();
+            return;
+        }
+    }
+
+    // Mostrar otros errores normalmente
+    // ...
+}, [lastResult, onError, isBackendProcessing]);
+```
+
+**Perspectiva Clave**: La combinación de retry en backend + supresión inteligente de errores en frontend proporciona una experiencia robusta contra race conditions. El usuario no debería ver errores técnicos cuando el proceso subyacente tuvo éxito.
+
+### Limpieza de Elementos DOM de Error
+
+El componente AWS Amplify puede crear overlays de error que no se pueden controlar internamente. Limpieza forzada:
+
+```javascript
+const clearErrorState = () => {
+    setError(null);
+    setErrorDetails(null);
+    setShowHints(false);
+    
+    setTimeout(() => {
+        const errorSelectors = [
+            '.amplify-modal__overlay',
+            '.amplify-error',
+            '[class*="error"]',
+            '[class*="toast"]',
+            '[role="alert"]'
+        ];
+        errorSelectors.forEach(selector => {
+            document.querySelectorAll(selector).forEach(el => {
+                const text = el.innerText || '';
+                if (text.includes('Server issue') || 
+                    text.includes('Cannot complete') ||
+                    text.includes('results available')) {
+                    el.remove();
+                }
+            });
+        });
+    }, 100);
+};
+```
+
+**Perspectiva Clave**: Manipular el DOM directamente es un workaround necesario cuando el componente de terceros tiene comportamiento interno que no podemos controlar. Siempre hacer esto en un `setTimeout` para asegurar que el componente haya terminado su renderizado.
