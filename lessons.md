@@ -926,136 +926,86 @@ return redirect()->route('dashboard');
 
 ---
 
-## Race Condition con AWS Amplify FaceLivenessDetectorCore
+## Patrón de Componentes: Face Liveness
 
-### Problema: El Componente Consume los Resultados de la Sesión Antes que el Backend
+### Dos Componentes para Diferentes Contextos
 
-**Síntoma**: Error `ValidationException: Liveness session has results available. Please get results for the session.`
+Hemos creado dos componentes separados para manejar Face Liveness en diferentes contextos:
 
-**Causa Raíz**: El componente `FaceLivenessDetectorCore` de AWS Amplify internamente llama a `GetFaceLivenessSessionResults` después de completar el análisis. Esto causa un race condition cuando:
+#### 1. `FaceLivenessDetector.jsx` - Página de Registro (/register)
 
-1. Frontend inicia sesión Face Liveness
-2. Usuario completa el challenge
-3. Frontend callback llama al backend (`/complete-liveness-registration-guest`)
-4. Backend llama a `GetFaceLivenessSessionResults`
-5. Component internamente también llama a `GetFaceLivenessSessionResults`
-6. Uno de los dos falla porque los resultados ya fueron consumidos
-
-**Solución: Retry con Exponential Backoff en el Backend**
-
-El backend ahora implementa retry automático con exponential backoff:
-
-```php
-public function completeLivenessRegistrationGuest(Request $request, RekognitionService $rekognition)
-{
-    $sessionId = $request->input('sessionId');
-    $maxRetries = 5;
-    $initialDelayMs = 100;
-
-    for ($attempt = 0; $attempt < $maxRetries; $attempt++) {
-        try {
-            $livenessResult = $rekognition->getFaceLivenessSessionResults($sessionId);
-            // Verificar que tenemos resultados válidos
-            if (!isset($livenessResult['SessionId']) || !isset($livenessResult['ReferenceImage'])) {
-                // Resultados no listos aún, reintentar
-                if ($attempt < $maxRetries - 1) {
-                    $delayMs = $initialDelayMs * pow(2, $attempt);
-                    usleep($delayMs * 1000);
-                    continue;
-                }
-                throw new \Exception('Invalid liveness session results');
-            }
-            
-            // Procesar resultados...
-            return response()->json(['success' => true, 'retries' => $attempt]);
-            
-        } catch (\Exception $e) {
-            $errorMessage = $e->getMessage();
-            $isResultsNotAvailable = strpos($errorMessage, 'results available') !== false 
-                || strpos($errorMessage, 'No such session') !== false;
-            
-            if ($isResultsNotAvailable && $attempt < $maxRetries - 1) {
-                // Race condition: frontend consumió resultados primero, esperar y reintentar
-                $delayMs = $initialDelayMs * pow(2, $attempt);
-                logger("Race condition detected (attempt $attempt/$maxRetries), waiting {$delayMs}ms");
-                usleep($delayMs * 1000);
-                continue;
-            }
-            
-            return response()->json(['error' => $errorMessage], 400);
-        }
-    }
-}
-```
-
-**Solución: Supresión de Errores en el Frontend**
-
-El componente React ahora detecta y suprime errores relacionados con race condition:
+Este componente es usado por la página de registro principal. Características:
+- Flujo simple: usuario hace Face Liveness, callback notifica al form
+- Manejo de errores básicos
+- UI de error con consejos para el usuario
 
 ```javascript
-const handleError = useCallback((err) => {
-    const errorMessage = err.message || err.state || '';
-    const isResultsAlreadyConsumed = errorMessage.includes('results available') 
-        || errorMessage.includes('No such session');
-
-    // Si el backend ya tuvo éxito, suprimir este error
-    if (backendSuccessRef.current && lastResult?.success) {
-        console.log('Suppressing component error - backend already processed');
-        clearErrorState();
-        return;
+// register.blade.php usa este flujo:
+window.onLivenessComplete = function(result) {
+    if (result.success) {
+        document.getElementById('liveness_session_id').value = result.sessionId;
+        livenessCompleted = true;
+        document.getElementById('submit-btn').disabled = false;
+        
+        // Reemplaza el container con mensaje de éxito
+        container.innerHTML = '<div style="color: green;...">' +
+            '<h4>✓ Face Liveness completado exitosamente</h4>' +
+            '<p>Confidence: ' + result.confidence + '%</p></div>';
     }
-
-    // Si estamos esperando respuesta del backend, suprimir temporalmente
-    if (isBackendProcessing && !lastResult) {
-        suppressErrorsRef.current = true;
-        return;
-    }
-
-    // Si el componente intenta obtener resultados ya consumidos...
-    if (isResultsAlreadyConsumed && lastResult) {
-        if (lastResult.success) {
-            clearErrorState();
-            return;
-        }
-    }
-
-    // Mostrar otros errores normalmente
-    // ...
-}, [lastResult, onError, isBackendProcessing]);
-```
-
-**Perspectiva Clave**: La combinación de retry en backend + supresión inteligente de errores en frontend proporciona una experiencia robusta contra race conditions. El usuario no debería ver errores técnicos cuando el proceso subyacente tuvo éxito.
-
-### Limpieza de Elementos DOM de Error
-
-El componente AWS Amplify puede crear overlays de error que no se pueden controlar internamente. Limpieza forzada:
-
-```javascript
-const clearErrorState = () => {
-    setError(null);
-    setErrorDetails(null);
-    setShowHints(false);
-    
-    setTimeout(() => {
-        const errorSelectors = [
-            '.amplify-modal__overlay',
-            '.amplify-error',
-            '[class*="error"]',
-            '[class*="toast"]',
-            '[role="alert"]'
-        ];
-        errorSelectors.forEach(selector => {
-            document.querySelectorAll(selector).forEach(el => {
-                const text = el.innerText || '';
-                if (text.includes('Server issue') || 
-                    text.includes('Cannot complete') ||
-                    text.includes('results available')) {
-                    el.remove();
-                }
-            });
-        });
-    }, 100);
 };
 ```
 
-**Perspectiva Clave**: Manipular el DOM directamente es un workaround necesario cuando el componente de terceros tiene comportamiento interno que no podemos controlar. Siempre hacer esto en un `setTimeout` para asegurar que el componente haya terminado su renderizado.
+#### 2. `ModalFaceLiveness.jsx` - Modal en Dashboard
+
+Componente dedicado para uso en modales. Características:
+- **Cleanup automático**: Inmediatamente oculta elementos de AWS Amplify después del análisis
+- **UI de éxito limpia**: Muestra un overlay de éxito profesional
+- **Manejo de race condition**: Suprime errores de "results available"
+- **Flujo controlado**: Estados claros (loading, analyzing, complete, error)
+
+```javascript
+// ModalFaceLiveness.jsx
+const cleanupAmplifyUI = useCallback(() => {
+    // Oculta/limpia inmediatamente cualquier UI de AWS Amplify
+    setTimeout(() => {
+        const amplifyElements = container.querySelectorAll(
+            '.amplify-face-liveness-detector, .amplify-modal, ...'
+        );
+        amplifyElements.forEach(el => el.remove());
+    }, 50);
+}, []);
+```
+
+### Flujo del Componente ModalFaceLiveness
+
+1. **Estado Inicial**: Botón "Iniciar Verificación"
+2. **Loading**: "Iniciando..."
+3. **FaceLivenessDetectorCore activo**: Usuario completa el challenge
+4. **Analyzing**: "Verificando..." (mientras backend procesa)
+5. **Complete**: UI de éxito con checkmark verde ✓
+   - O **Error**: UI de error con botón "Intentar de Nuevo"
+
+### Por Qué Dos Componentes?
+
+- ** register.blade.php **: El formulario ya maneja el reemplazo del container con `window.onLivenessComplete`
+- ** Modal **: Necesita un componente autocontenido que maneje todos los estados internamente
+- **Mantenibilidad**: Cada componente tiene una responsabilidad clara
+- **Testing**: Más fácil probar cada componente de forma aislada
+
+### Inicialización de Componentes
+
+**Para página de registro:**
+```javascript
+window.initializeFaceLiveness = function(purpose, options) {
+    // Usa FaceLivenessDetector original
+    root.render(React.createElement(FaceLivenessDetector, {...}));
+};
+```
+
+**Para modal:**
+```javascript
+window.loadModalFaceLivenessComponent = function() {
+    // Usa ModalFaceLiveness dedicado
+    root.render(React.createElement(ModalFaceLiveness, {...}));
+};
+```

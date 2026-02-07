@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { Amplify } from 'aws-amplify';
 import '@aws-amplify/ui-react-liveness/styles.css';
 import FaceLivenessDetector from './components/FaceLivenessDetector';
+import ModalFaceLiveness from './components/ModalFaceLiveness';
 
 if (typeof window !== 'undefined') {
     window.Amplify = Amplify;
@@ -58,7 +59,7 @@ window.initializeFaceLiveness = function(purpose = 'verification', options = {})
     );
 };
 
-// Modal-specific Face Liveness initialization
+// Modal-specific Face Liveness initialization using clean ModalFaceLiveness component
 window.loadModalFaceLivenessComponent = function() {
     const container = document.getElementById('modal-face-liveness-root');
     if (!container) {
@@ -69,7 +70,7 @@ window.loadModalFaceLivenessComponent = function() {
     const root = createRoot(container);
     
     const threshold = window.REKOGNITION_CONFIDENCE_THRESHOLD ?? 85.0;
-    console.log('Modal FaceLivenessDetector initialized with threshold:', threshold);
+    console.log('ModalFaceLiveness initialized with threshold:', threshold);
 
     const handleComplete = (result) => {
         console.log('Modal Face Liveness completed:', result);
@@ -98,8 +99,9 @@ window.loadModalFaceLivenessComponent = function() {
         }
     };
 
+    // Use the clean ModalFaceLiveness component
     root.render(
-        React.createElement(FaceLivenessDetector, {
+        React.createElement(ModalFaceLiveness, {
             purpose: 'registration',
             onComplete: handleComplete,
             onError: handleError,

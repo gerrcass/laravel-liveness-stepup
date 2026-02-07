@@ -1,23 +1,23 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { FaceLivenessDetectorCore } from '@aws-amplify/ui-react-liveness';
 
+/**
+ * FaceLivenessDetector Component
+ * 
+ * Main component for Face Liveness verification used in /register page.
+ * Provides a clean flow without modal-specific workarounds.
+ */
 const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, threshold = 85.0 }) => {
     const [sessionId, setSessionId] = useState(null);
     const [credentials, setCredentials] = useState(null);
     const [region, setRegion] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     const [isVerifying, setIsVerifying] = useState(false);
-    const [isBackendProcessing, setIsBackendProcessing] = useState(false);
     const [error, setError] = useState(null);
     const [errorDetails, setErrorDetails] = useState(null);
     const [showHints, setShowHints] = useState(false);
-    const [lastResult, setLastResult] = useState(null);
     const [componentReady, setComponentReady] = useState(false);
     const mountRef = useRef(false);
-    // Track if backend already processed successfully
-    const backendSuccessRef = useRef(false);
-    // Track if we should suppress errors (race condition detected)
-    const suppressErrorsRef = useRef(false);
 
     useEffect(() => {
         mountRef.current = true;
@@ -32,13 +32,8 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         setIsLoading(true);
         setError(null);
         setErrorDetails(null);
-        setLastResult(null);
         setShowHints(false);
         setComponentReady(false);
-        // Reset flags for new attempt
-        backendSuccessRef.current = false;
-        suppressErrorsRef.current = false;
-        console.log('createSession called, purpose:', purpose);
 
         try {
             let endpoint;
@@ -47,7 +42,6 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
             } else {
                 endpoint = '/rekognition/create-face-liveness-session';
             }
-            console.log('Calling endpoint:', endpoint);
 
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -63,8 +57,6 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
             }
 
             const data = await response.json();
-            console.log('Session created:', data.sessionId);
-            console.log('Credentials received:', data.credentials ? 'yes' : 'no');
 
             if (!mountRef.current) return;
 
@@ -98,17 +90,13 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         }
 
         setIsVerifying(true);
-        setIsBackendProcessing(true);
         setError(null);
         setErrorDetails(null);
 
         try {
-            // Call the appropriate backend endpoint based on purpose
-            // The backend handles race condition with retry logic
             const endpoint = purpose === 'registration' 
                 ? '/rekognition/complete-liveness-registration-guest'
                 : '/rekognition/complete-liveness-verification';
-            console.log('Calling completion endpoint:', endpoint);
 
             const response = await fetch(endpoint, {
                 method: 'POST',
@@ -121,35 +109,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
 
             const result = await response.json();
             console.log('Completion result:', result);
-            console.log('Retries used:', result.retries);
-            setLastResult(result);
             
-            // Mark that backend processed successfully
             if (result.success) {
-                backendSuccessRef.current = true;
-            }
-
-            // Store session ID in hidden form field (for verification form submission)
-            const sessionIdInput = document.getElementById('liveness_session_id');
-            if (sessionIdInput) {
-                sessionIdInput.value = sessionId;
-            }
-            
-            // Mark liveness as completed (for form validation)
-            if (typeof window.livenessCompleted !== 'undefined') {
-                window.livenessCompleted = true;
-            }
-
-            // Clear suppression flag since we got a definitive result
-            suppressErrorsRef.current = false;
-
-            if (result.success) {
-                if (purpose === 'verification') {
-                    onComplete?.(result);
-                } else {
-                    onComplete?.(result);
-                }
-            } else if (!result.success) {
+                onComplete?.(result);
+            } else {
                 const errorType = getErrorType(result);
                 setErrorDetails({
                     type: errorType,
@@ -188,13 +151,11 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         } finally {
             if (mountRef.current) {
                 setIsVerifying(false);
-                setIsBackendProcessing(false);
             }
         }
     }, [sessionId, purpose, onComplete, onError, threshold]);
 
     const getErrorType = (result) => {
-        // Check for search error (no faces detected)
         if (result.searchError && result.searchError.includes('no faces')) {
             return 'face_not_found';
         }
@@ -212,49 +173,9 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
 
     const handleError = useCallback((err) => {
         console.error('FaceLivenessDetectorCore error:', err);
-        console.error('Error state:', err.state);
-        console.error('Error details:', err);
-
-        // Check if this is a "results already consumed" error
-        // This happens when our backend already consumed the session results,
-        // and the component internally tries to get them too
-        const errorMessage = err.message || err.state || '';
-        const isResultsAlreadyConsumed = errorMessage.includes('results available') 
-            || errorMessage.includes('No such session');
-
-        // Check if we already have a successful result from the backend
-        // If so, suppress this error completely
-        if (backendSuccessRef.current && lastResult?.success) {
-            console.log('Suppressing component error - backend already processed successfully');
-            clearErrorState();
-            return;
-        }
-
-        // If we're still waiting for backend response, suppress errors temporarily
-        if (isBackendProcessing && !lastResult) {
-            console.log('Suppressing component error - backend is still processing');
-            suppressErrorsRef.current = true;
-            return;
-        }
-
-        // If backend returned an error (but we still need to suppress component's internal error)
-        if (isResultsAlreadyConsumed && lastResult && (lastResult.success || lastResult.error)) {
-            console.log('Detected race condition - component tried to get consumed results');
-            // If backend already gave us a result, suppress component error
-            if (lastResult.success) {
-                clearErrorState();
-                return;
-            }
-            // If backend failed, show that error instead
-            suppressErrorsRef.current = false;
-        }
-
-        if (suppressErrorsRef.current) {
-            console.log('Suppressing error due to race condition');
-            clearErrorState();
-            return;
-        }
-
+        
+        const errorMessage = err?.message || err?.state || '';
+        
         if (errorMessage.includes('image.png') || errorMessage.includes('Cannot read')) {
             setError('Face Liveness session error. Please try again.');
             setErrorDetails({
@@ -273,34 +194,7 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
             setShowHints(true);
         }
         onError?.(err);
-    }, [lastResult, onError, isBackendProcessing]);
-
-    const clearErrorState = () => {
-        setError(null);
-        setErrorDetails(null);
-        setShowHints(false);
-        
-        // Force remove any error overlay DOM elements that AWS Amplify might have created
-        setTimeout(() => {
-            const errorSelectors = [
-                '.amplify-modal__overlay',
-                '.amplify-error',
-                '[class*="error"]',
-                '[class*="toast"]',
-                '[role="alert"]'
-            ];
-            errorSelectors.forEach(selector => {
-                document.querySelectorAll(selector).forEach(el => {
-                    const text = el.innerText || '';
-                    if (text.includes('Server issue') || 
-                        text.includes('Cannot complete') ||
-                        text.includes('results available')) {
-                        el.remove();
-                    }
-                });
-            });
-        }, 100);
-    };
+    }, [onError]);
 
     const getHintsForError = (errorType) => {
         const hints = {
@@ -356,40 +250,23 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
         setCredentials(null);
         setError(null);
         setErrorDetails(null);
-        setLastResult(null);
         setShowHints(false);
         setComponentReady(false);
-        setIsBackendProcessing(false);
-        // Reset flags for new attempt
-        backendSuccessRef.current = false;
-        suppressErrorsRef.current = false;
     };
 
     const credentialProvider = useCallback(async () => {
-        console.log('credentialProvider called, credentials exist:', !!credentials);
-
         if (!credentials) {
             throw new Error('No credentials available');
         }
-
-        if (!credentials.accessKeyId || !credentials.secretAccessKey || !credentials.sessionToken) {
-            console.error('Invalid credentials structure:', credentials);
-            throw new Error('Invalid credentials structure');
-        }
-
-        const creds = {
+        return {
             accessKeyId: credentials.accessKeyId,
             secretAccessKey: credentials.secretAccessKey,
             sessionToken: credentials.sessionToken,
         };
-
-        console.log('Returning credentials for:', credentials.accessKeyId);
-        return creds;
     }, [credentials]);
 
     if (error) {
         const hints = errorDetails ? getHintsForError(errorDetails.type) : [];
-        const timestamp = new Date().toLocaleString();
         const showReferenceImage = errorDetails?.referenceImageUrl;
 
         return (
@@ -398,7 +275,6 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
                 border: '1px solid #f5c6cb',
                 borderRadius: '8px',
                 backgroundColor: '#fff5f5',
-                // maxWidth: '600px',
                 margin: '0 auto'
             }}>
                 <h3 style={{ color: '#c82333', marginTop: 0 }}>❌ Verification Failed</h3>
@@ -430,68 +306,6 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
                                 <span style={{color: '#6c757d', fontSize: '0.9em'}}> ({(errorDetails.threshold ?? threshold).toFixed(1)}% required)</span>
                             </p>
                         )}
-                        {errorDetails.faceId && (
-                            <p style={{ margin: '0.25rem 0' }}><strong>Face ID:</strong> {errorDetails.faceId}</p>
-                        )}
-                        {errorDetails.externalId && (
-                            <p style={{ margin: '0.25rem 0' }}><strong>User ID:</strong> {errorDetails.externalId}</p>
-                        )}
-                        <p style={{ margin: '0.25rem 0', color: '#6c757d' }}>
-                            <strong>Verified at:</strong> {timestamp}
-                        </p>
-                    </div>
-                )}
-
-                {/* Raw API responses from AWS Rekognition */}
-                {errorDetails?.livenessResult && (
-                    <details style={{ marginTop: '1rem' }}>
-                        <summary style={{ cursor: 'pointer', color: '#721c24', fontWeight: 'bold' }}>
-                            GetFaceLivenessSessionResults (Face Liveness API)
-                        </summary>
-                        <pre style={{
-                            background: '#fff',
-                            padding: '0.75rem',
-                            overflow: 'auto',
-                            maxHeight: '300px',
-                            marginTop: '0.5rem',
-                            border: '1px solid #f5c6cb',
-                            fontSize: '0.85rem'
-                        }}>
-                            {JSON.stringify(errorDetails.livenessResult, null, 2)}
-                        </pre>
-                    </details>
-                )}
-
-                {errorDetails?.searchResult && (
-                    <details style={{ marginTop: '0.5rem' }}>
-                        <summary style={{ cursor: 'pointer', color: '#721c24', fontWeight: 'bold' }}>
-                            SearchFacesByImage (Face Recognition API)
-                        </summary>
-                        <pre style={{
-                            background: '#fff',
-                            padding: '0.75rem',
-                            overflow: 'auto',
-                            maxHeight: '300px',
-                            marginTop: '0.5rem',
-                            border: '1px solid #f5c6cb',
-                            fontSize: '0.85rem'
-                        }}>
-                            {JSON.stringify(errorDetails.searchResult, null, 2)}
-                        </pre>
-                    </details>
-                )}
-
-                {/* Reference image from Face Liveness verification */}
-                {showReferenceImage && (
-                    <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #f5c6cb' }}>
-                        <p style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold' }}>
-                            Reference image from Face Liveness verification:
-                        </p>
-                        <img 
-                            src={`${errorDetails.referenceImageUrl}?t=${Date.now()}`} 
-                            alt="Reference image from verification"
-                            style={{ maxWidth: '300px', maxHeight: '300px', border: '1px solid #f5c6cb', borderRadius: '4px' }}
-                        />
                     </div>
                 )}
 
