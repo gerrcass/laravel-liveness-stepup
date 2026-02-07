@@ -328,10 +328,10 @@ const FaceLivenessDetector = ({ purpose = 'verification', onComplete, onError, t
                             </p>
                         )}
                         {errorDetails.faceId && (
-                            <p style={{ margin: '0.25rem 0' }}><strong>Face ID:</strong> {errorDetails.faceId}</p>
+                            <p style={{ margin: '0.25rem 0', color: '#6c757d' }}><strong>Face ID:</strong> {errorDetails.faceId}</p>
                         )}
                         {errorDetails.externalId && (
-                            <p style={{ margin: '0.25rem 0' }}><strong>User ID:</strong> {errorDetails.externalId}</p>
+                            <p style={{ margin: '0.25rem 0', color: '#6c757d' }}><strong>User ID:</strong> {errorDetails.externalId}</p>
                         )}
                         <p style={{ margin: '0.25rem 0', color: '#6c757d' }}>
                             <strong>Verified at:</strong> {timestamp}
