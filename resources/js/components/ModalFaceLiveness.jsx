@@ -186,10 +186,10 @@ const ModalFaceLiveness = ({
         };
     }, [credentials]);
 
-    const handleContinue = () => {
-        // Just close/continue - the form will handle the rest
-        onComplete?.(completionResult);
-    };
+    // const handleContinue = () => {
+    //     // Just close/continue - the form will handle the rest
+    //     onComplete?.(completionResult);
+    // };
 
     // Show success UI
     if (isComplete) {
@@ -222,7 +222,7 @@ const ModalFaceLiveness = ({
                         Confianza: {completionResult.confidence.toFixed(1)}%
                     </p>
                 )}
-                <button
+                {/* <button
                     onClick={handleContinue}
                     style={{
                         padding: '10px 24px',
@@ -236,7 +236,7 @@ const ModalFaceLiveness = ({
                     }}
                 >
                     Continuar
-                </button>
+                </button> */}
             </div>
         );
     }
@@ -354,10 +354,13 @@ const ModalFaceLiveness = ({
                 style={{
                     padding: '12px 24px',
                     fontSize: '16px',
-                    backgroundColor: '#007bff',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
+                    // backgroundColor: '#007bff',
+                    backgroundColor: '#f0f7ff',
+                    color: '#007bff',
+                    // border: 'none',
+                    borderWidth: '1px',
+                    borderColor: '#007bff',
+                    borderRadius: '32px',
                     cursor: isLoading ? 'not-allowed' : 'pointer',
                     opacity: isLoading ? 0.7 : 1
                 }}
